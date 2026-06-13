@@ -1,0 +1,43 @@
+<?php
+/**
+ * PurePress 默认配置。
+ *
+ * Copyright (C) 2026 Morton Li
+ *
+ * This file is part of PurePress and is licensed under GPL-3.0-only.
+ *
+ * @package PurePress
+ */
+
+declare(strict_types=1);
+
+namespace PurePress\Configuration;
+
+final class Defaults
+{
+    /**
+     * 模块默认配置。
+     *
+     * @var array<string, array<string, mixed>>
+     */
+    private const MODULES = [
+        'governance.rest_api' => [
+            'enabled' => false,
+        ],
+        'governance.xml_rpc' => [
+            'enabled' => false,
+        ],
+    ];
+
+    /**
+     * 获取指定模块的默认配置。
+     *
+     * @param string $moduleId 模块 ID，例如 `governance.rest_api`。
+     *
+     * @return array<string, mixed>
+     */
+    public static function module(string $moduleId): array
+    {
+        return self::MODULES[$moduleId] ?? [];
+    }
+}
