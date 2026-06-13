@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace PurePress\Configuration;
 
 use PurePress\Governance\RestApiModule;
+use PurePress\Governance\WordPressFingerprintModule;
 use PurePress\Governance\XmlRpcModule;
 
 final class ModuleCatalog
@@ -39,6 +40,13 @@ final class ModuleCatalog
                 'Governance',
                 '关闭 XML-RPC 功能，不影响默认文章评论。',
                 XmlRpcModule::class
+            ),
+            new ModuleDefinition(
+                'governance.wordpress_fingerprint',
+                '隐藏WordPress特征',
+                'Governance',
+                '隐藏常见 WordPress 识别特征，降低自动化信息收集暴露面。',
+                WordPressFingerprintModule::class
             ),
         ];
     }

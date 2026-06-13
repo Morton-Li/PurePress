@@ -22,6 +22,23 @@ final class SettingsPage
     private const PAGE_SLUG = 'purepress';
 
     /**
+     * PurePress 预留的配置层级。
+     *
+     * 当前只显示存在模块的层级；后续新增 Optimization、Enhancement、Integration、
+     * Replacement、Configuration 模块时会自动显示对应标签页。
+     *
+     * @var list<string>
+     */
+    private const GROUPS = [
+        'Governance',
+        'Optimization',
+        'Enhancement',
+        'Integration',
+        'Replacement',
+        'Configuration',
+    ];
+
+    /**
      * 配置读取与保存仓库。
      */
     private OptionRepository $options;
@@ -72,8 +89,9 @@ final class SettingsPage
 
         check_admin_referer('purepress_save_settings');
 
+        $group = $this->submittedGroup();
         $moduleIds = $this->submittedModuleIds();
-        $allowedModuleIds = ModuleCatalog::ids();
+        $allowedModuleIds = $this->moduleIdsForGroup($group);
 
         $this->options->saveModuleStates($moduleIds, $allowedModuleIds);
 
@@ -81,6 +99,7 @@ final class SettingsPage
             add_query_arg(
                 [
                     'page' => self::PAGE_SLUG,
+                    'purepress_tab' => $group,
                     'purepress_saved' => '1',
                 ],
                 admin_url('options-general.php')
@@ -99,7 +118,9 @@ final class SettingsPage
         }
 
         $settings = $this->options->all();
-        $modules = ModuleCatalog::definitions();
+        $visibleGroups = $this->visibleGroups();
+        $activeGroup = $this->activeGroup($visibleGroups);
+        $modules = $this->modulesForGroup($activeGroup);
         ?>
         <div class="wrap">
             <h1>PurePress 设置</h1>
@@ -112,42 +133,42 @@ final class SettingsPage
 
             <p>PurePress 的所有能力都通过模块独立启用。默认情况下，功能模块保持关闭，由你按站点需要逐步打开。</p>
 
+            <h2 class="nav-tab-wrapper">
+                <?php foreach ($visibleGroups as $group) : ?>
+                    <a
+                        class="nav-tab <?php echo $group === $activeGroup ? 'nav-tab-active' : ''; ?>"
+                        href="<?php echo esc_url($this->tabUrl($group)); ?>"
+                    >
+                        <?php echo esc_html($group); ?>
+                    </a>
+                <?php endforeach; ?>
+            </h2>
+
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                 <?php wp_nonce_field('purepress_save_settings'); ?>
                 <input type="hidden" name="action" value="purepress_save_settings">
+                <input type="hidden" name="group" value="<?php echo esc_attr($activeGroup); ?>">
 
-                <h2>模块开关</h2>
-                <table class="widefat striped" role="presentation">
-                    <thead>
-                        <tr>
-                            <th scope="col">模块</th>
-                            <th scope="col">层级</th>
-                            <th scope="col">说明</th>
-                            <th scope="col">状态</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($modules as $module) : ?>
-                            <?php $enabled = (bool) ($settings['modules'][$module->id()]['enabled'] ?? false); ?>
-                            <tr>
-                                <td><strong><?php echo esc_html($module->name()); ?></strong></td>
-                                <td><?php echo esc_html($module->group()); ?></td>
-                                <td><?php echo esc_html($module->description()); ?></td>
-                                <td>
-                                    <label>
-                                        <input
-                                            type="checkbox"
-                                            name="modules[]"
-                                            value="<?php echo esc_attr($module->id()); ?>"
-                                            <?php checked($enabled); ?>
-                                        >
-                                        启用
-                                    </label>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
+                <h2><?php echo esc_html($activeGroup); ?></h2>
+
+                <?php foreach ($modules as $module) : ?>
+                    <?php $enabled = (bool) ($settings['modules'][$module->id()]['enabled'] ?? false); ?>
+                    <fieldset style="margin: 16px 0; padding: 16px; border: 1px solid #dcdcde; background: #fff;">
+                        <legend>
+                            <strong><?php echo esc_html($module->name()); ?></strong>
+                        </legend>
+                        <p><?php echo esc_html($module->description()); ?></p>
+                        <label>
+                            <input
+                                type="checkbox"
+                                name="modules[]"
+                                value="<?php echo esc_attr($module->id()); ?>"
+                                <?php checked($enabled); ?>
+                            >
+                            启用
+                        </label>
+                    </fieldset>
+                <?php endforeach; ?>
 
                 <?php submit_button('保存设置'); ?>
             </form>
@@ -188,6 +209,26 @@ final class SettingsPage
     }
 
     /**
+     * 读取并清洗用户提交的层级。
+     */
+    private function submittedGroup(): string
+    {
+        $group = $_POST['group'] ?? '';
+
+        if (is_scalar($group)) {
+            $group = (string) $group;
+
+            if (function_exists('wp_unslash')) {
+                $group = (string) wp_unslash($group);
+            }
+        } else {
+            $group = '';
+        }
+
+        return in_array($group, self::GROUPS, true) ? $group : $this->visibleGroups()[0];
+    }
+
+    /**
      * 清洗用户提交的模块 ID。
      *
      * 模块 ID 允许使用点号表达层级，例如 `governance.rest_api`。
@@ -197,5 +238,91 @@ final class SettingsPage
     private function sanitizeModuleId(string $moduleId): string
     {
         return (string) preg_replace('/[^a-z0-9_.-]/', '', strtolower($moduleId));
+    }
+
+    /**
+     * 获取当前存在模块的层级列表。
+     *
+     * @return list<string>
+     */
+    private function visibleGroups(): array
+    {
+        $groups = [];
+
+        foreach (self::GROUPS as $group) {
+            if ([] === $this->modulesForGroup($group)) {
+                continue;
+            }
+
+            $groups[] = $group;
+        }
+
+        return [] === $groups ? ['Governance'] : $groups;
+    }
+
+    /**
+     * 获取当前激活的层级。
+     *
+     * @param list<string> $visibleGroups 当前可见层级列表。
+     */
+    private function activeGroup(array $visibleGroups): string
+    {
+        $requestedGroup = $_GET['purepress_tab'] ?? '';
+
+        if (is_scalar($requestedGroup)) {
+            $requestedGroup = (string) $requestedGroup;
+        } else {
+            $requestedGroup = '';
+        }
+
+        return in_array($requestedGroup, $visibleGroups, true) ? $requestedGroup : $visibleGroups[0];
+    }
+
+    /**
+     * 获取指定层级的模块定义。
+     *
+     * @param string $group 层级名称，例如 `Governance`。
+     *
+     * @return list<\PurePress\Configuration\ModuleDefinition>
+     */
+    private function modulesForGroup(string $group): array
+    {
+        return array_values(
+            array_filter(
+                ModuleCatalog::definitions(),
+                static fn ($module): bool => $module->group() === $group
+            )
+        );
+    }
+
+    /**
+     * 获取指定层级允许保存的模块 ID。
+     *
+     * @param string $group 层级名称，例如 `Governance`。
+     *
+     * @return list<string>
+     */
+    private function moduleIdsForGroup(string $group): array
+    {
+        return array_map(
+            static fn ($module): string => $module->id(),
+            $this->modulesForGroup($group)
+        );
+    }
+
+    /**
+     * 获取层级标签页 URL。
+     *
+     * @param string $group 层级名称，例如 `Governance`。
+     */
+    private function tabUrl(string $group): string
+    {
+        return add_query_arg(
+            [
+                'page' => self::PAGE_SLUG,
+                'purepress_tab' => $group,
+            ],
+            admin_url('options-general.php')
+        );
     }
 }

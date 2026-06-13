@@ -27,6 +27,9 @@ final class Defaults
         'governance.xml_rpc' => [
             'enabled' => false,
         ],
+        'governance.wordpress_fingerprint' => [
+            'enabled' => false,
+        ],
     ];
 
     /**

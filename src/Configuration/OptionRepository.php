@@ -44,6 +44,20 @@ final class OptionRepository
     }
 
     /**
+     * 获取当前数据库中记录的 PurePress 版本。
+     */
+    public function storedVersion(): ?string
+    {
+        if (! function_exists('get_option')) {
+            return null;
+        }
+
+        $version = get_option(OptionKeys::version(), null);
+
+        return is_string($version) ? $version : null;
+    }
+
+    /**
      * 保存模块启用状态。
      *
      * @param list<string> $enabledModuleIds 用户提交的已启用模块 ID 列表。
