@@ -34,6 +34,7 @@ final class XmlRpcModule implements ModuleInterface
     public function register(HookRegistry $hooks): void
     {
         $hooks->action('init', [$this, 'blockXmlRpcRequest'], 0);
+        $hooks->action('wp', [$this, 'removeXmlRpcDiscoveryLinks']);
         $hooks->filter('xmlrpc_enabled', [$this, 'disableXmlRpc']);
         $hooks->filter('xmlrpc_methods', [$this, 'removeXmlRpcMethods']);
     }
@@ -57,6 +58,18 @@ final class XmlRpcModule implements ModuleInterface
 
         echo 'PurePress 已关闭 XML-RPC 功能。';
         exit;
+    }
+
+    /**
+     * 移除前台 HTML head 中的 XML-RPC RSD 发现链接。
+     */
+    public function removeXmlRpcDiscoveryLinks(): void
+    {
+        if (function_exists('is_admin') && is_admin()) {
+            return;
+        }
+
+        remove_action('wp_head', 'rsd_link');
     }
 
     /**

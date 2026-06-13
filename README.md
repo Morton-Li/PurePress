@@ -24,10 +24,11 @@ PurePress 将围绕以下层次逐步建设：
 
 ## 已支持能力
 
-| 能力          | 层级         | 说明                  |
-|-------------|------------|---------------------|
-| REST API 控制 | Governance | 限制未登录用户访问 REST API。 |
-| XML-RPC 控制  | Governance | 关闭 XML-RPC 功能。      |
+| 能力              | 层级         | 说明                    |
+|-----------------|------------|-----------------------|
+| REST API 控制     | Governance | 限制未登录用户访问 REST API。   |
+| XML-RPC 控制      | Governance | 关闭 XML-RPC 功能。        |
+| 隐藏 WordPress 特征 | Governance | 隐藏前端 WordPress 常见识别特征。 |
 
 ## License
 

@@ -66,10 +66,10 @@ final class Plugin
         $options = new OptionRepository();
 
         if ($options->storedVersion() !== PUREPRESS_VERSION) {
-            (new OptionSynchronizer($options))->sync();
+            new OptionSynchronizer($options)->sync();
         }
 
-        (new SettingsPage($options))->register($hooks);
+        new SettingsPage($options)->register($hooks);
 
         foreach ($this->modules() as $module) {
             if (! $options->isModuleEnabled($module->id())) {

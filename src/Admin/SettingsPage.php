@@ -14,12 +14,13 @@ declare(strict_types=1);
 namespace PurePress\Admin;
 
 use PurePress\Configuration\ModuleCatalog;
+use PurePress\Configuration\ModuleDefinition;
 use PurePress\Configuration\OptionRepository;
 use PurePress\Support\HookRegistry;
 
 final class SettingsPage
 {
-    private const PAGE_SLUG = 'purepress';
+    private const string PAGE_SLUG = 'purepress';
 
     /**
      * PurePress 预留的配置层级。
@@ -29,7 +30,7 @@ final class SettingsPage
      *
      * @var list<string>
      */
-    private const GROUPS = [
+    private const array GROUPS = [
         'Governance',
         'Optimization',
         'Enhancement',
@@ -283,7 +284,7 @@ final class SettingsPage
      *
      * @param string $group 层级名称，例如 `Governance`。
      *
-     * @return list<\PurePress\Configuration\ModuleDefinition>
+     * @return list<ModuleDefinition>
      */
     private function modulesForGroup(string $group): array
     {
