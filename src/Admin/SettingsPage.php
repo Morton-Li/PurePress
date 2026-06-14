@@ -236,6 +236,12 @@ final class SettingsPage
                     max-width: 360px;
                 }
 
+                .purepress-module__actions {
+                    margin-top: 16px;
+                    padding-top: 12px;
+                    border-top: 1px solid #dcdcde;
+                }
+
                 @media (max-width: 782px) {
                     .purepress-module__layout--with-info {
                         display: block;
@@ -326,21 +332,10 @@ final class SettingsPage
             </form>
 
             <?php if ($activeGroup === 'Enhancement' && $this->hasModule($modules, self::SMTP_MODULE_ID)) : ?>
-                <fieldset class="purepress-module">
-                    <legend>
-                        <strong>发送测试邮件</strong>
-                    </legend>
-                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
-                        <?php wp_nonce_field('purepress_send_test_email'); ?>
-                        <input type="hidden" name="action" value="purepress_send_test_email">
-                        <p class="purepress-module__description">测试邮件使用已保存的 SMTP 配置发送。</p>
-                        <div class="purepress-module__fields">
-                            <label for="purepress-test-email">收件邮箱</label>
-                            <input id="purepress-test-email" type="email" name="recipient" required>
-                        </div>
-                        <?php submit_button('发送测试邮件', 'secondary', 'submit', false); ?>
-                    </form>
-                </fieldset>
+                <form id="purepress-smtp-test-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <?php wp_nonce_field('purepress_send_test_email'); ?>
+                    <input type="hidden" name="action" value="purepress_send_test_email">
+                </form>
             <?php endif; ?>
         </div>
         <?php
@@ -417,11 +412,12 @@ final class SettingsPage
 
         $currentSettings = $this->options->moduleSettings(self::SMTP_MODULE_ID);
         $password = $this->sanitizeSecretValue($rawSettings['password'] ?? '');
+        $port = $this->sanitizePort($rawSettings['port'] ?? 587);
 
         return [
             'host' => $this->sanitizeTextValue($rawSettings['host'] ?? ''),
-            'port' => $this->sanitizePort($rawSettings['port'] ?? 587),
-            'encryption' => $this->sanitizeEncryption($rawSettings['encryption'] ?? 'tls'),
+            'port' => $port,
+            'encryption' => $this->sanitizeEncryption($rawSettings['encryption'] ?? 'tls', $port),
             'auth' => isset($rawSettings['auth']),
             'username' => $this->sanitizeTextValue($rawSettings['username'] ?? ''),
             'password' => $password !== '' ? $password : (string) ($currentSettings['password'] ?? ''),
@@ -545,12 +541,18 @@ final class SettingsPage
      * 清洗 SMTP 加密方式。
      *
      * @param mixed $value 原始加密方式。
+     * @param int   $port  SMTP 端口。
      */
-    private function sanitizeEncryption(mixed $value): string
+    private function sanitizeEncryption(mixed $value, int $port): string
     {
         $encryption = is_scalar($value) ? (string) $value : 'tls';
+        $encryption = in_array($encryption, ['none', 'ssl', 'tls'], true) ? $encryption : 'tls';
 
-        return in_array($encryption, ['none', 'ssl', 'tls'], true) ? $encryption : 'tls';
+        if ($port === 465 && $encryption === 'tls') {
+            return 'ssl';
+        }
+
+        return $encryption;
     }
 
     /**
@@ -685,6 +687,17 @@ final class SettingsPage
 
             <label for="purepress-smtp-from-name">发件人名称</label>
             <input id="purepress-smtp-from-name" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[from_name]" value="<?php echo esc_attr((string) ($moduleSettings['from_name'] ?? '')); ?>">
+        </div>
+
+        <div class="purepress-module__actions">
+            <p class="purepress-module__description">测试邮件使用已保存的 SMTP 配置发送。</p>
+            <div class="purepress-module__fields">
+                <label for="purepress-test-email">测试收件邮箱</label>
+                <input id="purepress-test-email" type="email" name="recipient" form="purepress-smtp-test-form" required>
+            </div>
+            <p>
+                <button class="button button-secondary" type="submit" form="purepress-smtp-test-form">发送测试邮件</button>
+            </p>
         </div>
         <?php
     }

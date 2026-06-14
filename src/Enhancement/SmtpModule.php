@@ -56,11 +56,13 @@ final class SmtpModule implements ModuleInterface
             $mailer->isSMTP();
         }
 
-        $mailer->Host = $host;
-        $mailer->Port = (int) ($settings['port'] ?? 587);
-        $mailer->SMTPAuth = (bool) ($settings['auth'] ?? true);
+        $port = (int) ($settings['port'] ?? 587);
+        $encryption = $this->normalizedEncryption((string) ($settings['encryption'] ?? 'tls'), $port);
 
-        $encryption = (string) ($settings['encryption'] ?? 'tls');
+        $mailer->Host = $host;
+        $mailer->Port = $port;
+        $mailer->SMTPAuth = (bool) ($settings['auth'] ?? true);
+        $mailer->Timeout = 10;
 
         if ($encryption === 'none') {
             $mailer->SMTPSecure = '';
@@ -96,5 +98,27 @@ final class SmtpModule implements ModuleInterface
         }
 
         return (bool) filter_var($email, FILTER_VALIDATE_EMAIL);
+    }
+
+    /**
+     * 规范化 SMTP 加密方式。
+     *
+     * 465 端口通常使用隐式 TLS/SSL；如果错误配置为 STARTTLS，部分服务端会在握手阶段
+     * 长时间等待，导致当前 WordPress 请求被阻塞。
+     *
+     * @param string $encryption 配置中的加密方式。
+     * @param int    $port       SMTP 端口。
+     */
+    private function normalizedEncryption(string $encryption, int $port): string
+    {
+        if (! in_array($encryption, ['none', 'ssl', 'tls'], true)) {
+            $encryption = 'tls';
+        }
+
+        if ($port === 465 && $encryption === 'tls') {
+            return 'ssl';
+        }
+
+        return $encryption;
     }
 }
