@@ -93,10 +93,19 @@ jobs:
           cd build
           zip -qr "../dist/${{ steps.version.outputs.zip_name }}" purepress
 
-      - name: Upload package artifact
+      - name: Upload installable plugin artifact
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
-          name: purepress-package
+          name: purepress-installable-${{ steps.version.outputs.version }}
+          path: build
+          if-no-files-found: error
+
+      - name: Upload release package artifact
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
+        with:
+          name: purepress-release-package
           path: dist/${{ steps.version.outputs.zip_name }}
           if-no-files-found: error
 
@@ -112,7 +121,7 @@ jobs:
       - name: Download package artifact
         uses: actions/download-artifact@v8
         with:
-          name: purepress-package
+          name: purepress-release-package
           path: dist
 
       - name: Publish GitHub Release
