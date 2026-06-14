@@ -30,7 +30,7 @@ PurePress 将围绕以下层次逐步建设：
 | XML-RPC 控制      | Governance  | 关闭 XML-RPC 功能。         |
 | 隐藏 WordPress 特征 | Governance  | 隐藏前端 WordPress 常见识别特征。 |
 | SMTP 发信         | Enhancement | 使用 SMTP 接管默认邮件发送。      |
-| S3 兼容对象存储      | Integration | 使用 S3 兼容存储接管媒体文件。     |
+| S3 兼容对象存储       | Integration | 使用 S3 兼容存储接管媒体文件。      |
 
 ## License
 

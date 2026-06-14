@@ -132,9 +132,8 @@ final class S3MediaModule implements ModuleInterface
 
         $remote = [
             'bucket' => (string) $this->settings()['bucket'],
-            'object_prefix' => (string) ($this->settings()['object_prefix'] ?? ''),
+            'path_prefix' => $this->pathPrefix(),
             'public_base_url' => (string) ($this->settings()['public_base_url'] ?? ''),
-            'public_url_prefix' => (string) ($this->settings()['public_url_prefix'] ?? ''),
             'files' => [],
         ];
 
@@ -567,7 +566,7 @@ final class S3MediaModule implements ModuleInterface
      */
     private function objectKey(string $relativePath): string
     {
-        $prefix = $this->sanitizeRelativePath((string) ($this->settings()['object_prefix'] ?? ''));
+        $prefix = $this->pathPrefix();
         $relativePath = $this->sanitizeRelativePath($relativePath);
 
         return $prefix !== '' ? $prefix . '/' . $relativePath : $relativePath;
@@ -582,11 +581,29 @@ final class S3MediaModule implements ModuleInterface
     {
         $settings = $this->settings();
         $baseUrl = rtrim((string) ($settings['public_base_url'] ?? ''), '/');
-        $urlPrefix = $this->sanitizeRelativePath((string) ($settings['public_url_prefix'] ?? ''));
+        $urlPrefix = $this->pathPrefix();
         $relativePath = $this->sanitizeRelativePath($relativePath);
         $path = $urlPrefix !== '' ? $urlPrefix . '/' . $relativePath : $relativePath;
 
         return $baseUrl . '/' . $path;
+    }
+
+    /**
+     * 获取远端对象和公开 URL 共用的路径前缀。
+     */
+    private function pathPrefix(): string
+    {
+        $settings = $this->settings();
+
+        if (isset($settings['path_prefix']) && is_scalar($settings['path_prefix'])) {
+            return $this->sanitizeRelativePath((string) $settings['path_prefix']);
+        }
+
+        if (isset($settings['object_prefix']) && is_scalar($settings['object_prefix'])) {
+            return $this->sanitizeRelativePath((string) $settings['object_prefix']);
+        }
+
+        return '';
     }
 
     /**

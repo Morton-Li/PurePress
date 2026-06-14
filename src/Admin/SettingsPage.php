@@ -458,9 +458,8 @@ final class SettingsPage
             'access_key' => $this->sanitizeTextValue($rawSettings['access_key'] ?? ''),
             'secret_key' => $secretKey !== '' ? $secretKey : (string) ($currentSettings['secret_key'] ?? ''),
             'path_style' => isset($rawSettings['path_style']),
-            'object_prefix' => $this->sanitizePathValue($rawSettings['object_prefix'] ?? ''),
+            'path_prefix' => $this->sanitizePathValue($rawSettings['path_prefix'] ?? ''),
             'public_base_url' => $this->sanitizeUrlValue($rawSettings['public_base_url'] ?? ''),
-            'public_url_prefix' => $this->sanitizePathValue($rawSettings['public_url_prefix'] ?? ''),
         ];
     }
 
@@ -815,16 +814,31 @@ final class SettingsPage
                 启用
             </label>
 
-            <label for="purepress-s3-object-prefix">远端对象前缀</label>
-            <input id="purepress-s3-object-prefix" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[object_prefix]" value="<?php echo esc_attr((string) ($moduleSettings['object_prefix'] ?? '')); ?>" placeholder="uploads">
+            <label for="purepress-s3-path-prefix">路径前缀</label>
+            <input id="purepress-s3-path-prefix" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[path_prefix]" value="<?php echo esc_attr($this->s3PathPrefix($moduleSettings)); ?>" placeholder="uploads">
 
             <label for="purepress-s3-public-base-url">公开访问域名</label>
             <input id="purepress-s3-public-base-url" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[public_base_url]" value="<?php echo esc_attr((string) ($moduleSettings['public_base_url'] ?? '')); ?>" placeholder="https://media.example.com">
-
-            <label for="purepress-s3-public-url-prefix">公开 URL 前缀</label>
-            <input id="purepress-s3-public-url-prefix" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[public_url_prefix]" value="<?php echo esc_attr((string) ($moduleSettings['public_url_prefix'] ?? '')); ?>" placeholder="blog-media">
         </div>
         <?php
+    }
+
+    /**
+     * 获取 S3 兼容对象存储路径前缀。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function s3PathPrefix(array $moduleSettings): string
+    {
+        if (isset($moduleSettings['path_prefix']) && is_scalar($moduleSettings['path_prefix'])) {
+            return (string) $moduleSettings['path_prefix'];
+        }
+
+        if (isset($moduleSettings['object_prefix']) && is_scalar($moduleSettings['object_prefix'])) {
+            return (string) $moduleSettings['object_prefix'];
+        }
+
+        return '';
     }
 
     /**

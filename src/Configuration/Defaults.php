@@ -49,9 +49,8 @@ final class Defaults
             'access_key' => '',
             'secret_key' => '',
             'path_style' => true,
-            'object_prefix' => '',
+            'path_prefix' => '',
             'public_base_url' => '',
-            'public_url_prefix' => '',
         ],
     ];
 
