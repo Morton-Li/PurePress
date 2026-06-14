@@ -1,0 +1,24 @@
+{
+    "name": "purepress/purepress",
+    "description": "面向 WordPress 的统一治理、体验优化、能力增强与基础设施集成插件。",
+    "type": "wordpress-plugin",
+    "license": "GPL-3.0-only",
+    "homepage": "https://github.com/Morton-Li/PurePress",
+    "authors": [
+        {
+            "name": "Morton Li"
+        }
+    ],
+    "support": {
+        "source": "https://github.com/Morton-Li/PurePress.git"
+    },
+    "require": {
+        "php": ">=8.5",
+        "aws/aws-sdk-php": "^3"
+    },
+    "autoload": {
+        "psr-4": {
+            "PurePress\\": "src/"
+        }
+    }
+}
