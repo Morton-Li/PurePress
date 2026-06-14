@@ -44,6 +44,25 @@ final class OptionRepository
     }
 
     /**
+     * 读取指定模块配置，并与模块默认配置合并。
+     *
+     * @param string $moduleId 模块 ID，例如 `governance.rest_api`。
+     *
+     * @return array<string, mixed>
+     */
+    public function moduleSettings(string $moduleId): array
+    {
+        $stored = [];
+
+        if (function_exists('get_option')) {
+            $option = get_option(OptionKeys::module($moduleId), []);
+            $stored = is_array($option) ? $option : [];
+        }
+
+        return array_replace_recursive(Defaults::module($moduleId), $stored);
+    }
+
+    /**
      * 获取当前数据库中记录的 PurePress 版本。
      */
     public function storedVersion(): ?string
@@ -80,6 +99,23 @@ final class OptionRepository
     }
 
     /**
+     * 保存指定模块配置。
+     *
+     * @param string               $moduleId 模块 ID，例如 `enhancement.smtp`。
+     * @param array<string, mixed> $settings 模块配置。
+     */
+    public function saveModuleSettings(string $moduleId, array $settings): void
+    {
+        if (! function_exists('update_option')) {
+            return;
+        }
+
+        $moduleSettings = array_replace_recursive($this->moduleSettings($moduleId), $settings);
+
+        update_option(OptionKeys::module($moduleId), $moduleSettings, false);
+    }
+
+    /**
      * 写入插件版本记录。
      */
     public function saveVersion(): void
@@ -107,22 +143,4 @@ final class OptionRepository
         add_option(OptionKeys::module($moduleId), Defaults::module($moduleId), '', false);
     }
 
-    /**
-     * 读取指定模块配置，并与模块默认配置合并。
-     *
-     * @param string $moduleId 模块 ID，例如 `governance.rest_api`。
-     *
-     * @return array<string, mixed>
-     */
-    private function moduleSettings(string $moduleId): array
-    {
-        $stored = [];
-
-        if (function_exists('get_option')) {
-            $option = get_option(OptionKeys::module($moduleId), []);
-            $stored = is_array($option) ? $option : [];
-        }
-
-        return array_replace_recursive(Defaults::module($moduleId), $stored);
-    }
 }

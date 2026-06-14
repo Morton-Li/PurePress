@@ -34,8 +34,34 @@ final class RestApiModule implements ModuleInterface
      */
     public function register(HookRegistry $hooks): void
     {
+        $hooks->action('wp', [$this, 'removeRestApiDiscoveryLinks']);
+        $hooks->action('template_redirect', [$this, 'removeRestApiDiscoveryHeaders'], 0);
         $hooks->filter('rest_authentication_errors', [$this, 'denyAnonymousRequests']);
         $hooks->filter('rest_jsonp_enabled', [$this, 'disableJsonp']);
+    }
+
+    /**
+     * 移除前台 HTML head 中的 REST API 发现链接。
+     */
+    public function removeRestApiDiscoveryLinks(): void
+    {
+        if (function_exists('is_admin') && is_admin()) {
+            return;
+        }
+
+        remove_action('wp_head', 'rest_output_link_wp_head');
+    }
+
+    /**
+     * 移除前台响应头中的 REST API 发现信息。
+     */
+    public function removeRestApiDiscoveryHeaders(): void
+    {
+        if (function_exists('is_admin') && is_admin()) {
+            return;
+        }
+
+        remove_action('template_redirect', 'rest_output_link_header', 11);
     }
 
     /**

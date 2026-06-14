@@ -43,21 +43,42 @@ final class ModuleDefinition
     private string $moduleClass;
 
     /**
+     * 面向用户展示的模块扩展说明。
+     */
+    private string $details;
+
+    /**
+     * 面向用户展示的配置示例。
+     */
+    private string $configurationExample;
+
+    /**
      * 创建模块定义。
      *
-     * @param string       $id          模块唯一 ID。
-     * @param string       $name        面向用户展示的模块名称。
-     * @param string       $group       模块所属层级。
-     * @param string       $description 面向用户展示的模块说明。
-     * @param class-string $moduleClass 模块实现类名。
+     * @param string       $id                   模块唯一 ID。
+     * @param string       $name                 面向用户展示的模块名称。
+     * @param string       $group                模块所属层级。
+     * @param string       $description          面向用户展示的模块说明。
+     * @param class-string $moduleClass          模块实现类名。
+     * @param string       $details              面向用户展示的模块扩展说明。
+     * @param string       $configurationExample 面向用户展示的配置示例。
      */
-    public function __construct(string $id, string $name, string $group, string $description, string $moduleClass)
-    {
+    public function __construct(
+        string $id,
+        string $name,
+        string $group,
+        string $description,
+        string $moduleClass,
+        string $details = '',
+        string $configurationExample = ''
+    ) {
         $this->id = $id;
         $this->name = $name;
         $this->group = $group;
         $this->description = $description;
         $this->moduleClass = $moduleClass;
+        $this->details = $details;
+        $this->configurationExample = $configurationExample;
     }
 
     /**
@@ -100,5 +121,29 @@ final class ModuleDefinition
     public function moduleClass(): string
     {
         return $this->moduleClass;
+    }
+
+    /**
+     * 判断模块是否存在扩展说明。
+     */
+    public function hasAdditionalInfo(): bool
+    {
+        return $this->details !== '' || $this->configurationExample !== '';
+    }
+
+    /**
+     * 获取面向用户展示的模块扩展说明。
+     */
+    public function details(): string
+    {
+        return $this->details;
+    }
+
+    /**
+     * 获取面向用户展示的配置示例。
+     */
+    public function configurationExample(): string
+    {
+        return $this->configurationExample;
     }
 }

@@ -22,31 +22,6 @@ final class WordPressFingerprintModule implements ModuleInterface
     private const string PUBLIC_THEMES_PATH = '/themes/';
 
     /**
-     * 允许通过虚拟资源路径访问的静态文件类型。
-     *
-     * @var array<string, string>
-     */
-    private const array ASSET_MIME_TYPES = [
-        'avif' => 'image/avif',
-        'css' => 'text/css; charset=utf-8',
-        'eot' => 'application/vnd.ms-fontobject',
-        'gif' => 'image/gif',
-        'ico' => 'image/x-icon',
-        'jpeg' => 'image/jpeg',
-        'jpg' => 'image/jpeg',
-        'js' => 'text/javascript; charset=utf-8',
-        'json' => 'application/json; charset=utf-8',
-        'map' => 'application/json; charset=utf-8',
-        'png' => 'image/png',
-        'svg' => 'image/svg+xml; charset=utf-8',
-        'ttf' => 'font/ttf',
-        'wasm' => 'application/wasm',
-        'webp' => 'image/webp',
-        'woff' => 'font/woff',
-        'woff2' => 'font/woff2',
-    ];
-
-    /**
      * 获取模块唯一 ID。
      */
     public function id(): string
@@ -62,7 +37,6 @@ final class WordPressFingerprintModule implements ModuleInterface
     public function register(HookRegistry $hooks): void
     {
         $hooks->action('wp', [$this, 'removeFrontendGenerator']);
-        $hooks->action('init', [$this, 'serveAsset'], 0);
         $hooks->filter('includes_url', [$this, 'rewriteAssetUrl']);
         $hooks->filter('content_url', [$this, 'rewriteAssetUrl']);
         $hooks->filter('theme_file_uri', [$this, 'rewriteAssetUrl']);
@@ -119,30 +93,6 @@ final class WordPressFingerprintModule implements ModuleInterface
     }
 
     /**
-     * 响应虚拟资源路径，将其映射回 WordPress 真实静态资源。
-     */
-    public function serveAsset(): void
-    {
-        $requestPath = $this->requestPath();
-
-        if (! in_array(($_SERVER['REQUEST_METHOD'] ?? 'GET'), ['GET', 'HEAD'], true)) {
-            if ($this->isVirtualAssetRequest($requestPath)) {
-                $this->sendAssetMethodNotAllowed();
-            }
-
-            return;
-        }
-
-        if (str_starts_with($requestPath, self::PUBLIC_CORE_PATH)) {
-            $this->serveMappedAsset($requestPath, self::PUBLIC_CORE_PATH, $this->coreRootPath());
-        }
-
-        if (str_starts_with($requestPath, self::PUBLIC_THEMES_PATH)) {
-            $this->serveMappedAsset($requestPath, self::PUBLIC_THEMES_PATH, $this->themeRootPath());
-        }
-    }
-
-    /**
      * 将 WordPress 资源路径改写为公开虚拟路径。
      *
      * @param string $path URL path 部分。
@@ -155,7 +105,7 @@ final class WordPressFingerprintModule implements ModuleInterface
             if (str_contains($path, $corePath)) {
                 return (string) preg_replace(
                     '#/' . preg_quote(trim(WPINC, '/'), '#') . '/#',
-                    $this->publicAssetPath(self::PUBLIC_CORE_PATH),
+                    self::PUBLIC_CORE_PATH,
                     $path,
                     1
                 );
@@ -167,130 +117,13 @@ final class WordPressFingerprintModule implements ModuleInterface
         if ($themesPath !== '' && str_contains($path, $themesPath)) {
             return (string) preg_replace(
                 '#' . preg_quote($themesPath, '#') . '#',
-                $this->publicAssetPath(self::PUBLIC_THEMES_PATH),
+                self::PUBLIC_THEMES_PATH,
                 $path,
                 1
             );
         }
 
         return $path;
-    }
-
-    /**
-     * 响应已识别的虚拟资源路径。
-     *
-     * @param string      $requestPath 当前请求路径。
-     * @param string      $publicPath  公开虚拟路径前缀。
-     * @param string|null $rootPath    真实资源根目录。
-     */
-    private function serveMappedAsset(string $requestPath, string $publicPath, ?string $rootPath): void
-    {
-        if ($rootPath === null) {
-            $this->sendAssetNotFound();
-        }
-
-        $relativePath = rawurldecode(substr($requestPath, strlen($publicPath)));
-        $relativePath = str_replace('\\', '/', $relativePath);
-
-        if (! $this->isSafeAssetPath($relativePath)) {
-            $this->sendAssetNotFound();
-        }
-
-        $assetPath = realpath($rootPath . DIRECTORY_SEPARATOR . $relativePath);
-
-        if (! is_string($assetPath) || ! is_file($assetPath) || ! str_starts_with($assetPath, $rootPath . DIRECTORY_SEPARATOR)) {
-            $this->sendAssetNotFound();
-        }
-
-        $this->sendAssetFile($assetPath);
-    }
-
-    /**
-     * 获取当前请求路径，并兼容 WordPress 安装在子目录的场景。
-     */
-    private function requestPath(): string
-    {
-        $requestUri = (string) ($_SERVER['REQUEST_URI'] ?? '');
-        $path = wp_parse_url($requestUri, PHP_URL_PATH);
-
-        if (! is_string($path) || $path === '') {
-            return '/';
-        }
-
-        $homePath = wp_parse_url(home_url('/'), PHP_URL_PATH);
-
-        if (is_string($homePath) && $homePath !== '/') {
-            $homePath = '/' . trim($homePath, '/');
-
-            if (str_starts_with($path, $homePath . '/')) {
-                $path = substr($path, strlen($homePath));
-            }
-        }
-
-        $frontControllerPath = '/index.php/';
-
-        if (str_starts_with($path, $frontControllerPath)) {
-            $path = '/' . substr($path, strlen($frontControllerPath));
-        }
-
-        return '/' . ltrim($path, '/');
-    }
-
-    /**
-     * 获取公开资源路径。
-     *
-     * 当站点永久链接结构使用 index.php 前端控制器时，输出 /index.php/{path}，
-     * 避免服务器静态资源规则直接拦截虚拟资源路径导致 PHP 映射逻辑无法执行。
-     *
-     * @param string $publicPath 公开虚拟路径前缀。
-     */
-    private function publicAssetPath(string $publicPath): string
-    {
-        if (function_exists('get_option')) {
-            $permalinkStructure = get_option('permalink_structure');
-
-            if (is_string($permalinkStructure) && str_starts_with($permalinkStructure, '/index.php/')) {
-                return '/index.php' . $publicPath;
-            }
-        }
-
-        return $publicPath;
-    }
-
-    /**
-     * 获取 WordPress 核心资源真实根路径。
-     */
-    private function coreRootPath(): ?string
-    {
-        if (! defined('ABSPATH') || ! defined('WPINC')) {
-            return null;
-        }
-
-        $coreRoot = realpath(ABSPATH . trim(WPINC, '/'));
-
-        return is_string($coreRoot) ? $coreRoot : null;
-    }
-
-    /**
-     * 获取 WordPress 主题资源真实根路径。
-     */
-    private function themeRootPath(): ?string
-    {
-        if (function_exists('get_theme_root')) {
-            $themeRoot = realpath(get_theme_root());
-
-            if (is_string($themeRoot)) {
-                return $themeRoot;
-            }
-        }
-
-        if (! defined('WP_CONTENT_DIR')) {
-            return null;
-        }
-
-        $themeRoot = realpath(WP_CONTENT_DIR . DIRECTORY_SEPARATOR . 'themes');
-
-        return is_string($themeRoot) ? $themeRoot : null;
     }
 
     /**
@@ -309,112 +142,6 @@ final class WordPressFingerprintModule implements ModuleInterface
         }
 
         return '/' . trim($contentPath, '/') . '/themes/';
-    }
-
-    /**
-     * 判断当前请求是否为 PurePress 虚拟资源请求。
-     *
-     * @param string $requestPath 当前请求路径。
-     */
-    private function isVirtualAssetRequest(string $requestPath): bool
-    {
-        return str_starts_with($requestPath, self::PUBLIC_CORE_PATH)
-            || str_starts_with($requestPath, self::PUBLIC_THEMES_PATH);
-    }
-
-    /**
-     * 判断资源相对路径是否安全且属于允许输出的静态文件类型。
-     *
-     * @param string $relativePath 资源相对路径。
-     */
-    private function isSafeAssetPath(string $relativePath): bool
-    {
-        if ($relativePath === '' || str_starts_with($relativePath, '/')) {
-            return false;
-        }
-
-        $segments = explode('/', $relativePath);
-
-        if (in_array('..', $segments, true)) {
-            return false;
-        }
-
-        $extension = strtolower((string) pathinfo($relativePath, PATHINFO_EXTENSION));
-
-        return isset(self::ASSET_MIME_TYPES[$extension]);
-    }
-
-    /**
-     * 输出核心静态资源文件。
-     *
-     * @param string $assetPath 已通过安全校验的真实文件路径。
-     */
-    private function sendAssetFile(string $assetPath): void
-    {
-        $extension = strtolower((string) pathinfo($assetPath, PATHINFO_EXTENSION));
-        $mimeType = self::ASSET_MIME_TYPES[$extension] ?? 'application/octet-stream';
-        $lastModified = filemtime($assetPath);
-
-        if (! is_int($lastModified)) {
-            $lastModified = time();
-        }
-
-        $etag = '"' . sha1($assetPath . '|' . $lastModified . '|' . filesize($assetPath)) . '"';
-
-        if (
-            (isset($_SERVER['HTTP_IF_NONE_MATCH']) && trim((string) $_SERVER['HTTP_IF_NONE_MATCH']) === $etag)
-            || (isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) && strtotime((string) $_SERVER['HTTP_IF_MODIFIED_SINCE']) >= $lastModified)
-        ) {
-            status_header(304);
-            exit;
-        }
-
-        status_header(200);
-
-        if (! headers_sent()) {
-            header('Content-Type: ' . $mimeType);
-            header('Content-Length: ' . filesize($assetPath));
-            header('Cache-Control: public, max-age=31536000, immutable');
-            header('Last-Modified: ' . gmdate('D, d M Y H:i:s', $lastModified) . ' GMT');
-            header('ETag: ' . $etag);
-        }
-
-        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'HEAD') {
-            readfile($assetPath);
-        }
-
-        exit;
-    }
-
-    /**
-     * 输出核心资源未找到响应。
-     */
-    private function sendAssetNotFound(): void
-    {
-        status_header(404);
-
-        if (! headers_sent()) {
-            header('Content-Type: text/plain; charset=utf-8');
-        }
-
-        echo 'PurePress 未找到请求的核心资源。';
-        exit;
-    }
-
-    /**
-     * 输出核心资源请求方法不允许响应。
-     */
-    private function sendAssetMethodNotAllowed(): void
-    {
-        status_header(405);
-
-        if (! headers_sent()) {
-            header('Allow: GET, HEAD');
-            header('Content-Type: text/plain; charset=utf-8');
-        }
-
-        echo 'PurePress 不允许使用当前请求方法访问核心资源。';
-        exit;
     }
 
     /**

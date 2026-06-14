@@ -30,6 +30,17 @@ final class Defaults
         'governance.wordpress_fingerprint' => [
             'enabled' => false,
         ],
+        'enhancement.smtp' => [
+            'enabled' => false,
+            'host' => '',
+            'port' => 587,
+            'encryption' => 'tls',
+            'auth' => true,
+            'username' => '',
+            'password' => '',
+            'from_email' => '',
+            'from_name' => '',
+        ],
     ];
 
     /**

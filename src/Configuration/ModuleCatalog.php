@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace PurePress\Configuration;
 
+use PurePress\Enhancement\SmtpModule;
 use PurePress\Governance\RestApiModule;
 use PurePress\Governance\WordPressFingerprintModule;
 use PurePress\Governance\XmlRpcModule;
@@ -46,7 +47,24 @@ final class ModuleCatalog
                 '隐藏 WordPress 特征',
                 'Governance',
                 '隐藏常见 WordPress 识别特征，降低自动化信息收集暴露面。',
-                WordPressFingerprintModule::class
+                WordPressFingerprintModule::class,
+                '启用资源路径隐藏后，PurePress 会将前台核心资源输出为 /core/...，主题资源输出为 /themes/...。为避免这些公开路径进入 PHP，建议在 Nginx server 块中增加静态重写规则。',
+                <<<'NGINX'
+location ~ ^/core/(.+)$ {
+    try_files /wp-includes/$1 =404;
+}
+
+location ~ ^/themes/(.+)$ {
+    try_files /wp-content/themes/$1 =404;
+}
+NGINX
+            ),
+            new ModuleDefinition(
+                'enhancement.smtp',
+                'SMTP 发信',
+                'Enhancement',
+                '使用 SMTP 接管 WordPress 默认邮件发送。',
+                SmtpModule::class
             ),
         ];
     }
