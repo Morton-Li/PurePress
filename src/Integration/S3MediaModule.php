@@ -45,6 +45,11 @@ final class S3MediaModule implements ModuleInterface
     private ?S3Client $client = null;
 
     /**
+     * S3 客户端初始化失败原因。
+     */
+    private string $clientError = '';
+
+    /**
      * 获取模块唯一 ID。
      */
     public function id(): string
@@ -59,50 +64,12 @@ final class S3MediaModule implements ModuleInterface
      */
     public function register(HookRegistry $hooks): void
     {
-        $hooks->filter('wp_handle_upload', [$this, 'uploadOriginalFile'], 20, 2);
         $hooks->filter('wp_generate_attachment_metadata', [$this, 'uploadAttachmentFiles'], 20, 3);
         $hooks->filter('wp_get_attachment_url', [$this, 'remoteAttachmentUrl'], 20, 2);
+        $hooks->filter('attachment_link', [$this, 'remoteAttachmentLink'], 20, 2);
         $hooks->filter('image_downsize', [$this, 'remoteImageDownsize'], 20, 3);
         $hooks->filter('wp_prepare_attachment_for_js', [$this, 'prepareAttachmentForJs'], 20, 3);
         $hooks->action('delete_attachment', [$this, 'deleteRemoteObjects'], 10, 2);
-    }
-
-    /**
-     * WordPress 将上传文件移动到工作区后，立即上传原始文件到远端。
-     *
-     * @param array<string,mixed> $upload  WordPress 上传结果。
-     * @param string              $context 上传上下文。
-     *
-     * @return array<string,mixed>
-     */
-    public function uploadOriginalFile(array $upload, string $context): array
-    {
-        unset($context);
-
-        if (isset($upload['error']) || ! isset($upload['file']) || ! is_string($upload['file'])) {
-            return $upload;
-        }
-
-        if (! $this->isConfigured()) {
-            return ['error' => 'PurePress S3 兼容对象存储尚未完成配置。'];
-        }
-
-        $relativePath = $this->relativePath($upload['file']);
-
-        if ($relativePath === '') {
-            return ['error' => 'PurePress 无法识别媒体文件路径。'];
-        }
-
-        $result = $this->uploadFile($upload['file'], $relativePath, (string) ($upload['type'] ?? ''));
-
-        if (! $result['success']) {
-            return ['error' => $result['message']];
-        }
-
-        $this->uploadedFiles[$this->normalizePath($upload['file'])] = $result['key'];
-        $upload['url'] = $this->publicUrl($relativePath);
-
-        return $upload;
     }
 
     /**
@@ -215,6 +182,26 @@ final class S3MediaModule implements ModuleInterface
     }
 
     /**
+     * 将附件固定链接替换为远端文件公开 URL。
+     *
+     * WordPress 会为媒体文件创建 attachment post，并通过 get_attachment_link()
+     * 输出附件页面固定链接；S3 接管后附件页面不再是实际文件位置。
+     *
+     * @param string $link         WordPress 原始附件固定链接。
+     * @param int    $attachmentId 附件 ID。
+     */
+    public function remoteAttachmentLink(string $link, int $attachmentId): string
+    {
+        $remoteUrl = $this->remoteAttachmentUrl($link, $attachmentId);
+
+        if (! is_string($remoteUrl) || $remoteUrl === '') {
+            return $link;
+        }
+
+        return $remoteUrl;
+    }
+
+    /**
      * 将图片尺寸 URL 替换为远端公开 URL。
      *
      * @param mixed        $downsize     现有图片尺寸结果。
@@ -277,6 +264,7 @@ final class S3MediaModule implements ModuleInterface
 
         if (is_string($remoteUrl)) {
             $response['url'] = $remoteUrl;
+            $response['link'] = $remoteUrl;
         }
 
         $response['purepressS3'] = [
@@ -385,7 +373,7 @@ final class S3MediaModule implements ModuleInterface
             return [
                 'success' => false,
                 'key' => '',
-                'message' => 'PurePress 无法初始化 S3 客户端，请检查依赖和配置。',
+                'message' => $this->clientError !== '' ? $this->clientError : 'PurePress 无法初始化 S3 客户端。',
             ];
         }
 
@@ -428,7 +416,13 @@ final class S3MediaModule implements ModuleInterface
             return $this->client;
         }
 
-        if (! class_exists(S3Client::class) || ! $this->isConfigured()) {
+        if (! class_exists(S3Client::class)) {
+            $this->clientError = 'PurePress 缺少 Composer 依赖，请使用包含 vendor 目录的安装包。';
+            return null;
+        }
+
+        if (! $this->isConfigured()) {
+            $this->clientError = 'PurePress S3 兼容对象存储尚未完成配置。';
             return null;
         }
 
@@ -451,7 +445,12 @@ final class S3MediaModule implements ModuleInterface
             $configuration['endpoint'] = (string) $settings['endpoint'];
         }
 
-        $this->client = new S3Client($configuration);
+        try {
+            $this->client = new S3Client($configuration);
+        } catch (Throwable $throwable) {
+            $this->clientError = 'PurePress 无法初始化 S3 客户端：' . $throwable->getMessage();
+            return null;
+        }
 
         return $this->client;
     }
@@ -509,29 +508,6 @@ final class S3MediaModule implements ModuleInterface
         $file = get_post_meta($attachmentId, '_wp_attached_file', true);
 
         return is_string($file) ? $this->sanitizeRelativePath($file) : '';
-    }
-
-    /**
-     * 将本地绝对路径转换为相对上传目录路径。
-     *
-     * @param string $absolutePath 本地绝对路径。
-     */
-    private function relativePath(string $absolutePath): string
-    {
-        $uploadDir = $this->uploadDir();
-
-        if ([] === $uploadDir || empty($uploadDir['basedir']) || ! is_string($uploadDir['basedir'])) {
-            return '';
-        }
-
-        $baseDir = rtrim($this->normalizePath($uploadDir['basedir']), '/');
-        $path = $this->normalizePath($absolutePath);
-
-        if (! str_starts_with($path, $baseDir . '/')) {
-            return '';
-        }
-
-        return $this->sanitizeRelativePath(substr($path, strlen($baseDir) + 1));
     }
 
     /**
@@ -615,6 +591,7 @@ final class S3MediaModule implements ModuleInterface
     private function deleteLocalFiles(array $files, string $baseDir): void
     {
         $baseDir = rtrim($this->normalizePath($baseDir), '/');
+        $directories = [];
 
         foreach (array_values(array_unique($files)) as $file) {
             $file = $this->normalizePath($file);
@@ -623,12 +600,63 @@ final class S3MediaModule implements ModuleInterface
                 continue;
             }
 
+            $directories[] = dirname($file);
+
             if (function_exists('wp_delete_file')) {
                 wp_delete_file($file);
             } else {
                 @unlink($file);
             }
         }
+
+        $this->deleteEmptyLocalDirectories($directories, $baseDir);
+    }
+
+    /**
+     * 清理上传目录下已经为空的工作目录。
+     *
+     * @param list<string> $directories 本地目录列表。
+     * @param string       $baseDir     上传目录根路径。
+     */
+    private function deleteEmptyLocalDirectories(array $directories, string $baseDir): void
+    {
+        $baseDir = rtrim($this->normalizePath($baseDir), '/');
+        $directories = array_values(array_unique(array_map([$this, 'normalizePath'], $directories)));
+        usort(
+            $directories,
+            static fn (string $left, string $right): int => strlen($right) <=> strlen($left)
+        );
+
+        foreach ($directories as $directory) {
+            $directory = rtrim($directory, '/');
+
+            while (
+                $directory !== ''
+                && $directory !== $baseDir
+                && str_starts_with($directory, $baseDir . '/')
+                && is_dir($directory)
+                && $this->isDirectoryEmpty($directory)
+            ) {
+                @rmdir($directory);
+                $directory = dirname($directory);
+            }
+        }
+    }
+
+    /**
+     * 判断本地目录是否为空。
+     *
+     * @param string $directory 本地目录路径。
+     */
+    private function isDirectoryEmpty(string $directory): bool
+    {
+        $items = scandir($directory);
+
+        if (! is_array($items)) {
+            return false;
+        }
+
+        return count(array_diff($items, ['.', '..'])) === 0;
     }
 
     /**
