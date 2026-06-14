@@ -13,7 +13,8 @@
         "source": "https://github.com/Morton-Li/PurePress.git"
     },
     "require": {
-        "php": ">=8.5"
+        "php": ">=8.5",
+        "aws/aws-sdk-php": "^3"
     },
     "autoload": {
         "psr-4": {

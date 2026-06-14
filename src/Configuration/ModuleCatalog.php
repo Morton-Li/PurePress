@@ -17,6 +17,7 @@ use PurePress\Enhancement\SmtpModule;
 use PurePress\Governance\RestApiModule;
 use PurePress\Governance\WordPressFingerprintModule;
 use PurePress\Governance\XmlRpcModule;
+use PurePress\Integration\S3MediaModule;
 
 final class ModuleCatalog
 {
@@ -65,6 +66,13 @@ NGINX
                 'Enhancement',
                 '使用 SMTP 接管 WordPress 默认邮件发送。',
                 SmtpModule::class
+            ),
+            new ModuleDefinition(
+                'integration.s3_media',
+                'S3 兼容对象存储',
+                'Integration',
+                '使用 S3 兼容对象存储接管 WordPress 媒体文件。',
+                S3MediaModule::class
             ),
         ];
     }

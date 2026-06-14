@@ -41,6 +41,18 @@ final class Defaults
             'from_email' => '',
             'from_name' => '',
         ],
+        'integration.s3_media' => [
+            'enabled' => false,
+            'endpoint' => '',
+            'region' => 'auto',
+            'bucket' => '',
+            'access_key' => '',
+            'secret_key' => '',
+            'path_style' => true,
+            'object_prefix' => '',
+            'public_base_url' => '',
+            'public_url_prefix' => '',
+        ],
     ];
 
     /**

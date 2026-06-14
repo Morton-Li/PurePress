@@ -22,6 +22,7 @@ final class SettingsPage
 {
     private const string PAGE_SLUG = 'purepress';
     private const string SMTP_MODULE_ID = 'enhancement.smtp';
+    private const string S3_MEDIA_MODULE_ID = 'integration.s3_media';
 
     /**
      * PurePress 预留的配置层级。
@@ -380,17 +381,21 @@ final class SettingsPage
      */
     private function saveSubmittedModuleSettings(array $allowedModuleIds): void
     {
-        if (! in_array(self::SMTP_MODULE_ID, $allowedModuleIds, true)) {
-            return;
+        if (in_array(self::SMTP_MODULE_ID, $allowedModuleIds, true)) {
+            $smtpSettings = $this->submittedSmtpSettings();
+
+            if ([] !== $smtpSettings) {
+                $this->options->saveModuleSettings(self::SMTP_MODULE_ID, $smtpSettings);
+            }
         }
 
-        $smtpSettings = $this->submittedSmtpSettings();
+        if (in_array(self::S3_MEDIA_MODULE_ID, $allowedModuleIds, true)) {
+            $s3Settings = $this->submittedS3MediaSettings();
 
-        if ([] === $smtpSettings) {
-            return;
+            if ([] !== $s3Settings) {
+                $this->options->saveModuleSettings(self::S3_MEDIA_MODULE_ID, $s3Settings);
+            }
         }
-
-        $this->options->saveModuleSettings(self::SMTP_MODULE_ID, $smtpSettings);
     }
 
     /**
@@ -423,6 +428,39 @@ final class SettingsPage
             'password' => $password !== '' ? $password : (string) ($currentSettings['password'] ?? ''),
             'from_email' => $this->sanitizeEmailValue($rawSettings['from_email'] ?? ''),
             'from_name' => $this->sanitizeTextValue($rawSettings['from_name'] ?? ''),
+        ];
+    }
+
+    /**
+     * 读取并清洗 S3 兼容对象存储配置。
+     *
+     * @return array<string, mixed>
+     */
+    private function submittedS3MediaSettings(): array
+    {
+        $rawSettings = $_POST['module_settings'][self::S3_MEDIA_MODULE_ID] ?? [];
+
+        if (! is_array($rawSettings)) {
+            return [];
+        }
+
+        if (function_exists('wp_unslash')) {
+            $rawSettings = wp_unslash($rawSettings);
+        }
+
+        $currentSettings = $this->options->moduleSettings(self::S3_MEDIA_MODULE_ID);
+        $secretKey = $this->sanitizeSecretValue($rawSettings['secret_key'] ?? '');
+
+        return [
+            'endpoint' => $this->sanitizeUrlValue($rawSettings['endpoint'] ?? ''),
+            'region' => $this->sanitizeTextValue($rawSettings['region'] ?? 'auto'),
+            'bucket' => $this->sanitizeTextValue($rawSettings['bucket'] ?? ''),
+            'access_key' => $this->sanitizeTextValue($rawSettings['access_key'] ?? ''),
+            'secret_key' => $secretKey !== '' ? $secretKey : (string) ($currentSettings['secret_key'] ?? ''),
+            'path_style' => isset($rawSettings['path_style']),
+            'object_prefix' => $this->sanitizePathValue($rawSettings['object_prefix'] ?? ''),
+            'public_base_url' => $this->sanitizeUrlValue($rawSettings['public_base_url'] ?? ''),
+            'public_url_prefix' => $this->sanitizePathValue($rawSettings['public_url_prefix'] ?? ''),
         ];
     }
 
@@ -519,6 +557,37 @@ final class SettingsPage
         }
 
         return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : '';
+    }
+
+    /**
+     * 清洗 URL 配置值。
+     *
+     * @param mixed $value 原始 URL 值。
+     */
+    private function sanitizeUrlValue(mixed $value): string
+    {
+        $value = is_scalar($value) ? trim((string) $value) : '';
+
+        if ($value === '') {
+            return '';
+        }
+
+        return function_exists('esc_url_raw') ? esc_url_raw($value) : filter_var($value, FILTER_SANITIZE_URL);
+    }
+
+    /**
+     * 清洗对象路径或 URL 路径前缀。
+     *
+     * @param mixed $value 原始路径值。
+     */
+    private function sanitizePathValue(mixed $value): string
+    {
+        $path = is_scalar($value) ? trim((string) $value) : '';
+        $path = str_replace('\\', '/', $path);
+        $path = preg_replace('#/+#', '/', $path);
+        $path = trim((string) $path, '/');
+
+        return str_replace(["\0", '..'], '', $path);
     }
 
     /**
@@ -649,10 +718,23 @@ final class SettingsPage
      */
     private function renderModuleFields(ModuleDefinition $module, array $moduleSettings): void
     {
-        if ($module->id() !== self::SMTP_MODULE_ID) {
+        if ($module->id() === self::SMTP_MODULE_ID) {
+            $this->renderSmtpFields($moduleSettings);
             return;
         }
 
+        if ($module->id() === self::S3_MEDIA_MODULE_ID) {
+            $this->renderS3MediaFields($moduleSettings);
+        }
+    }
+
+    /**
+     * 渲染 SMTP 配置字段。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function renderSmtpFields(array $moduleSettings): void
+    {
         $fieldPrefix = 'module_settings[' . self::SMTP_MODULE_ID . ']';
         $encryption = (string) ($moduleSettings['encryption'] ?? 'tls');
         ?>
@@ -698,6 +780,49 @@ final class SettingsPage
             <p>
                 <button class="button button-secondary" type="submit" form="purepress-smtp-test-form">发送测试邮件</button>
             </p>
+        </div>
+        <?php
+    }
+
+    /**
+     * 渲染 S3 兼容对象存储配置字段。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function renderS3MediaFields(array $moduleSettings): void
+    {
+        $fieldPrefix = 'module_settings[' . self::S3_MEDIA_MODULE_ID . ']';
+        ?>
+        <div class="purepress-module__fields">
+            <label for="purepress-s3-endpoint">Endpoint</label>
+            <input id="purepress-s3-endpoint" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[endpoint]" value="<?php echo esc_attr((string) ($moduleSettings['endpoint'] ?? '')); ?>" placeholder="https://example.r2.cloudflarestorage.com">
+
+            <label for="purepress-s3-region">Region</label>
+            <input id="purepress-s3-region" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[region]" value="<?php echo esc_attr((string) ($moduleSettings['region'] ?? 'auto')); ?>">
+
+            <label for="purepress-s3-bucket">Bucket</label>
+            <input id="purepress-s3-bucket" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[bucket]" value="<?php echo esc_attr((string) ($moduleSettings['bucket'] ?? '')); ?>">
+
+            <label for="purepress-s3-access-key">Access Key</label>
+            <input id="purepress-s3-access-key" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[access_key]" value="<?php echo esc_attr((string) ($moduleSettings['access_key'] ?? '')); ?>" autocomplete="username">
+
+            <label for="purepress-s3-secret-key">Secret Key</label>
+            <input id="purepress-s3-secret-key" type="password" name="<?php echo esc_attr($fieldPrefix); ?>[secret_key]" value="" placeholder="<?php echo esc_attr(((string) ($moduleSettings['secret_key'] ?? '')) !== '' ? '已保存，留空则保持不变' : ''); ?>" autocomplete="new-password">
+
+            <label for="purepress-s3-path-style">Path-style endpoint</label>
+            <label>
+                <input id="purepress-s3-path-style" type="checkbox" name="<?php echo esc_attr($fieldPrefix); ?>[path_style]" value="1" <?php checked((bool) ($moduleSettings['path_style'] ?? true)); ?>>
+                启用
+            </label>
+
+            <label for="purepress-s3-object-prefix">远端对象前缀</label>
+            <input id="purepress-s3-object-prefix" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[object_prefix]" value="<?php echo esc_attr((string) ($moduleSettings['object_prefix'] ?? '')); ?>" placeholder="uploads">
+
+            <label for="purepress-s3-public-base-url">公开访问域名</label>
+            <input id="purepress-s3-public-base-url" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[public_base_url]" value="<?php echo esc_attr((string) ($moduleSettings['public_base_url'] ?? '')); ?>" placeholder="https://media.example.com">
+
+            <label for="purepress-s3-public-url-prefix">公开 URL 前缀</label>
+            <input id="purepress-s3-public-url-prefix" type="text" name="<?php echo esc_attr($fieldPrefix); ?>[public_url_prefix]" value="<?php echo esc_attr((string) ($moduleSettings['public_url_prefix'] ?? '')); ?>" placeholder="blog-media">
         </div>
         <?php
     }
