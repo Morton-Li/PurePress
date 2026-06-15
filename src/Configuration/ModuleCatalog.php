@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace PurePress\Configuration;
 
+use PurePress\Enhancement\MediaFoldersModule;
 use PurePress\Enhancement\SmtpModule;
 use PurePress\Governance\RestApiModule;
 use PurePress\Governance\WordPressFingerprintModule;
@@ -66,6 +67,13 @@ NGINX
                 'Enhancement',
                 '使用 SMTP 接管 WordPress 默认邮件发送。',
                 SmtpModule::class
+            ),
+            new ModuleDefinition(
+                'enhancement.media_folders',
+                '媒体库目录',
+                'Enhancement',
+                '在媒体库中提供目录化管理，并让对象存储路径跟随目录结构。',
+                MediaFoldersModule::class
             ),
             new ModuleDefinition(
                 'integration.s3_media',

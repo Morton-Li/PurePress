@@ -1,0 +1,83 @@
+.purepress-media-folders {
+    margin: 12px 0;
+    padding: 12px;
+    border: 1px solid #dcdcde;
+    background: #fff;
+}
+
+.purepress-media-folders__header {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.purepress-media-folders__header h2 {
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+.purepress-media-folders__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.purepress-media-folders__tree {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.purepress-media-folders__item {
+    min-height: 30px;
+    padding: 4px 10px 4px calc(10px + var(--purepress-folder-depth, 0) * 14px);
+    border: 1px solid #c3c4c7;
+    border-radius: 3px;
+    background: #f6f7f7;
+    color: #1d2327;
+    cursor: pointer;
+}
+
+.purepress-media-folders__item:hover,
+.purepress-media-folders__item:focus {
+    border-color: #2271b1;
+    color: #0a4b78;
+}
+
+.purepress-media-folders__item.is-active {
+    border-color: #2271b1;
+    background: #2271b1;
+    color: #fff;
+}
+
+.purepress-media-folders__count {
+    margin-left: 6px;
+    opacity: 0.72;
+}
+
+.purepress-media-folder-select {
+    max-width: 180px;
+}
+
+@media (max-width: 782px) {
+    .purepress-media-folders__header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .purepress-media-folders__actions,
+    .purepress-media-folders__tree {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        width: 100%;
+    }
+
+    .purepress-media-folders__item,
+    .purepress-media-folders__actions .button {
+        width: 100%;
+        text-align: left;
+    }
+}
