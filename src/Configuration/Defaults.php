@@ -41,6 +41,9 @@ final class Defaults
             'from_email' => '',
             'from_name' => '',
         ],
+        'enhancement.media_folders' => [
+            'enabled' => false,
+        ],
         'integration.s3_media' => [
             'enabled' => false,
             'endpoint' => '',
