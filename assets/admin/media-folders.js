@@ -200,17 +200,26 @@
         $('.purepress-media-folder-select').val(state.currentFolder);
     }
 
-    function renderFolderButtons(folders, depth) {
+    function renderFolderTreeItems(folders, depth) {
         var html = '';
 
         folders = folders || [];
 
         folders.forEach(function (folder) {
-            html += '<button type="button" class="purepress-media-folders__item" data-folder="' + escapeHtml(folder.id) + '" style="--purepress-folder-depth:' + depth + '">';
-            html += '<span>' + escapeHtml(folder.name) + '</span>';
+            html += '<li class="purepress-media-folders__node" style="--purepress-folder-depth:' + depth + '">';
+            html += '<button type="button" class="purepress-media-folders__item" data-folder="' + escapeHtml(folder.id) + '">';
+            html += '<span class="purepress-media-folders__branch" aria-hidden="true"></span>';
+            html += '<span class="purepress-media-folders__name">' + escapeHtml(folder.name) + '</span>';
             html += '<span class="purepress-media-folders__count">' + escapeHtml(folder.count || 0) + '</span>';
             html += '</button>';
-            html += renderFolderButtons(folder.children || [], depth + 1);
+
+            if (folder.children && folder.children.length) {
+                html += '<ul class="purepress-media-folders__children">';
+                html += renderFolderTreeItems(folder.children, depth + 1);
+                html += '</ul>';
+            }
+
+            html += '</li>';
         });
 
         return html;
@@ -235,16 +244,53 @@
         html += '<button type="button" class="button button-small" data-purepress-folder-action="unassign">' + escapeHtml(settings.labels.unassign) + '</button>';
         html += '</div>';
         html += '</div>';
-        html += '<div class="purepress-media-folders__tree">';
-        html += '<button type="button" class="purepress-media-folders__item" data-folder="all" style="--purepress-folder-depth:0"><span>' + escapeHtml(settings.labels.all) + '</span></button>';
-        html += '<button type="button" class="purepress-media-folders__item" data-folder="unassigned" style="--purepress-folder-depth:0"><span>' + escapeHtml(settings.labels.unassigned) + '</span></button>';
-        html += renderFolderButtons(settings.folders || [], 0);
-        html += '</div>';
+        html += '<nav class="purepress-media-folders__tree" aria-label="' + escapeHtml(settings.labels.folderFilter) + '">';
+        html += '<ul class="purepress-media-folders__list">';
+        html += '<li class="purepress-media-folders__node" style="--purepress-folder-depth:0">';
+        html += '<button type="button" class="purepress-media-folders__item purepress-media-folders__item--system" data-folder="all">';
+        html += '<span class="purepress-media-folders__branch" aria-hidden="true"></span>';
+        html += '<span class="purepress-media-folders__name">' + escapeHtml(settings.labels.all) + '</span>';
+        html += '</button>';
+        html += '</li>';
+        html += '<li class="purepress-media-folders__node" style="--purepress-folder-depth:0">';
+        html += '<button type="button" class="purepress-media-folders__item purepress-media-folders__item--system" data-folder="unassigned">';
+        html += '<span class="purepress-media-folders__branch" aria-hidden="true"></span>';
+        html += '<span class="purepress-media-folders__name">' + escapeHtml(settings.labels.unassigned) + '</span>';
+        html += '</button>';
+        html += '</li>';
+        html += renderFolderTreeItems(settings.folders || [], 0);
+        html += '</ul>';
+        html += '</nav>';
         html += '</section>';
 
         $('.purepress-media-folders').remove();
         $anchor.before(html);
+        attachFolderLayout();
         markActiveFolder();
+    }
+
+    function attachFolderLayout() {
+        var $panel = $('.purepress-media-folders').first();
+        var $filter = $('.wp-filter').first();
+        var $grid = $('#wp-media-grid');
+        var $layout = $('.purepress-media-library-layout').first();
+        var $content;
+
+        if (!$panel.length || !$filter.length || !$grid.length) {
+            return;
+        }
+
+        if ($layout.length) {
+            if (!$panel.parent().is($layout)) {
+                $layout.prepend($panel);
+            }
+
+            return;
+        }
+
+        $content = $filter.nextAll().not('.purepress-media-folders');
+        $filter.add($content).wrapAll('<div class="purepress-media-library-content"></div>');
+        $('.purepress-media-library-content').add($panel).wrapAll('<div class="purepress-media-library-layout"></div>');
     }
 
     function markActiveFolder() {
