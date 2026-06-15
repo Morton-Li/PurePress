@@ -57,6 +57,11 @@ final class S3MediaModule implements ModuleInterface
     private string $clientError = '';
 
     /**
+     * 媒体目录路径服务。
+     */
+    private ?S3MediaPathService $pathService = null;
+
+    /**
      * 获取模块唯一 ID。
      */
     public function id(): string
@@ -79,6 +84,7 @@ final class S3MediaModule implements ModuleInterface
         $hooks->filter('wp_calculate_image_srcset', [$this, 'remoteImageSrcset'], 20, 5);
         $hooks->filter('wp_prepare_attachment_for_js', [$this, 'prepareAttachmentForJs'], 20, 3);
         $hooks->filter('load_image_to_edit_path', [$this, 'loadRemoteImageForEdit'], 20, 3);
+        $hooks->filter('purepress_move_attachment_to_media_folder', [$this, 'moveAttachmentToMediaFolder'], 20, 3);
         $hooks->action('delete_attachment', [$this, 'deleteRemoteObjects'], 10, 2);
         $hooks->action('shutdown', [$this, 'cleanupDownloadedEditFiles'], 20, 0);
     }
@@ -104,9 +110,10 @@ final class S3MediaModule implements ModuleInterface
             return $data;
         }
 
-        $mainRelativePath = ! empty($data['file']) && is_string($data['file'])
+        $sourceMainRelativePath = ! empty($data['file']) && is_string($data['file'])
             ? $this->sanitizeRelativePath((string) $data['file'])
             : $this->attachmentRelativePath($attachmentId);
+        $targetMainRelativePath = $this->pathService()->targetRelativePathForAttachment($attachmentId, $sourceMainRelativePath);
 
         $remote = [
             'bucket' => (string) $this->settings()['bucket'],
@@ -115,13 +122,13 @@ final class S3MediaModule implements ModuleInterface
             'files' => [],
         ];
 
-        if ($mainRelativePath === '') {
+        if ($sourceMainRelativePath === '' || $targetMainRelativePath === '') {
             return $data;
         }
 
         $localFiles = [];
-        $mainPath = $this->absolutePath($mainRelativePath, $uploadDir);
-        $mainUpload = $this->ensureRemoteFile($mainPath, $mainRelativePath, (string) get_post_mime_type($attachmentId));
+        $mainPath = $this->absolutePath($sourceMainRelativePath, $uploadDir);
+        $mainUpload = $this->ensureRemoteFile($mainPath, $targetMainRelativePath, (string) get_post_mime_type($attachmentId));
 
         if (! $mainUpload['success']) {
             update_post_meta($attachmentId, self::ERROR_META_KEY, $mainUpload['message']);
@@ -137,9 +144,11 @@ final class S3MediaModule implements ModuleInterface
                     continue;
                 }
 
-                $sizeRelativePath = $this->relativeSiblingPath($mainRelativePath, $sizeData['file']);
-                $sizePath = $this->absolutePath($sizeRelativePath, $uploadDir);
-                $sizeUpload = $this->ensureRemoteFile($sizePath, $sizeRelativePath, (string) ($sizeData['mime-type'] ?? get_post_mime_type($attachmentId)));
+                $targetSizeFile = $this->targetSiblingFile($sourceMainRelativePath, $targetMainRelativePath, $sizeData['file']);
+                $sourceSizeRelativePath = $this->relativeSiblingPath($sourceMainRelativePath, $sizeData['file']);
+                $targetSizeRelativePath = $this->relativeSiblingPath($targetMainRelativePath, $targetSizeFile);
+                $sizePath = $this->absolutePath($sourceSizeRelativePath, $uploadDir);
+                $sizeUpload = $this->ensureRemoteFile($sizePath, $targetSizeRelativePath, (string) ($sizeData['mime-type'] ?? get_post_mime_type($attachmentId)));
 
                 if (! $sizeUpload['success']) {
                     unset($data['sizes'][$sizeName]);
@@ -147,17 +156,21 @@ final class S3MediaModule implements ModuleInterface
                 }
 
                 $remote['files']['sizes'][(string) $sizeName] = $sizeUpload['key'];
+                $data['sizes'][$sizeName]['file'] = $targetSizeFile;
                 $localFiles[] = $sizePath;
             }
         }
 
         if (! empty($data['original_image']) && is_string($data['original_image'])) {
-            $originalRelativePath = $this->relativeSiblingPath($mainRelativePath, $data['original_image']);
-            $originalPath = $this->absolutePath($originalRelativePath, $uploadDir);
-            $originalUpload = $this->ensureRemoteFile($originalPath, $originalRelativePath, (string) get_post_mime_type($attachmentId));
+            $targetOriginalFile = $this->targetSiblingFile($sourceMainRelativePath, $targetMainRelativePath, $data['original_image'], '-original');
+            $sourceOriginalRelativePath = $this->relativeSiblingPath($sourceMainRelativePath, $data['original_image']);
+            $targetOriginalRelativePath = $this->relativeSiblingPath($targetMainRelativePath, $targetOriginalFile);
+            $originalPath = $this->absolutePath($sourceOriginalRelativePath, $uploadDir);
+            $originalUpload = $this->ensureRemoteFile($originalPath, $targetOriginalRelativePath, (string) get_post_mime_type($attachmentId));
 
             if ($originalUpload['success']) {
                 $remote['files']['original_image'] = $originalUpload['key'];
+                $data['original_image'] = $targetOriginalFile;
                 $localFiles[] = $originalPath;
             }
         }
@@ -168,6 +181,8 @@ final class S3MediaModule implements ModuleInterface
             $data['filesize'] = (int) filesize($mainPath);
         }
 
+        $data['file'] = $targetMainRelativePath;
+        update_post_meta($attachmentId, '_wp_attached_file', $targetMainRelativePath);
         update_post_meta($attachmentId, self::REMOTE_META_KEY, $remote);
         delete_post_meta($attachmentId, self::ERROR_META_KEY);
         $this->deleteLocalFiles($localFiles, (string) $uploadDir['basedir']);
@@ -519,6 +534,114 @@ final class S3MediaModule implements ModuleInterface
     }
 
     /**
+     * 移动已接管媒体到指定媒体目录，并同步远端对象 Key。
+     *
+     * @param mixed $result       前一个存储处理器结果。
+     * @param int   $attachmentId 附件 ID。
+     * @param int   $folderId     目标媒体目录 ID，0 表示移出目录。
+     *
+     * @return mixed
+     */
+    public function moveAttachmentToMediaFolder(mixed $result, int $attachmentId, int $folderId): mixed
+    {
+        if (is_wp_error($result) || false === $result || ! $this->hasRemoteMeta($attachmentId)) {
+            return $result;
+        }
+
+        if (! $this->isConfigured()) {
+            return new \WP_Error('purepress_s3_not_configured', 'PurePress S3 兼容对象存储尚未完成配置。');
+        }
+
+        $client = $this->client();
+
+        if (null === $client) {
+            return new \WP_Error(
+                'purepress_s3_client_unavailable',
+                $this->clientError !== '' ? $this->clientError : 'PurePress 无法初始化 S3 客户端。'
+            );
+        }
+
+        $currentRelativePath = $this->attachmentRelativePath($attachmentId);
+
+        if ($currentRelativePath === '') {
+            return new \WP_Error('purepress_s3_missing_attachment_path', 'PurePress 无法读取当前媒体文件路径。');
+        }
+
+        $targetRelativePath = $folderId > 0
+            ? $this->pathService()->targetRelativePathForFolder($folderId, $currentRelativePath, $attachmentId)
+            : $this->pathService()->uniqueRelativePath(wp_basename($currentRelativePath), $attachmentId);
+
+        if ($targetRelativePath === '' || $targetRelativePath === $currentRelativePath) {
+            return true;
+        }
+
+        $remote = get_post_meta($attachmentId, self::REMOTE_META_KEY, true);
+        $remoteFiles = is_array($remote) && isset($remote['files']) && is_array($remote['files'])
+            ? $remote['files']
+            : [];
+        $metadata = wp_get_attachment_metadata($attachmentId);
+        $metadata = is_array($metadata) ? $metadata : [];
+        $updatedMetadata = $this->metadataForMovedAttachment($metadata, $currentRelativePath, $targetRelativePath);
+        $filePairs = $this->remoteFilePairsForMove($currentRelativePath, $targetRelativePath, $metadata, $updatedMetadata, $remoteFiles);
+
+        if ([] === $filePairs) {
+            return new \WP_Error('purepress_s3_missing_remote_files', 'PurePress 无法解析需要移动的远端媒体文件。');
+        }
+
+        $bucket = is_array($remote) && isset($remote['bucket']) && is_scalar($remote['bucket'])
+            ? (string) $remote['bucket']
+            : (string) $this->settings()['bucket'];
+
+        $copiedKeys = [];
+
+        foreach ($filePairs as $filePair) {
+            $copyError = $this->copyRemoteObject($client, $bucket, $filePair['source_key'], $filePair['target_key']);
+
+            if ($copyError instanceof \WP_Error) {
+                $this->deleteRemoteKeys($client, $bucket, $copiedKeys);
+                update_post_meta($attachmentId, self::ERROR_META_KEY, $copyError->get_error_message());
+                return $copyError;
+            }
+
+            if ($filePair['source_key'] !== $filePair['target_key']) {
+                $copiedKeys[] = $filePair['target_key'];
+            }
+        }
+
+        $updatedRemoteFiles = $this->applyMovedRemoteFileKeys($remoteFiles, $filePairs);
+
+        update_post_meta($attachmentId, '_wp_attached_file', $targetRelativePath);
+        wp_update_attachment_metadata($attachmentId, $updatedMetadata);
+        update_post_meta(
+            $attachmentId,
+            self::REMOTE_META_KEY,
+            [
+                'bucket' => $bucket,
+                'path_prefix' => $this->pathPrefix(),
+                'public_base_url' => (string) ($this->settings()['public_base_url'] ?? ''),
+                'files' => $updatedRemoteFiles,
+            ]
+        );
+        delete_post_meta($attachmentId, self::ERROR_META_KEY);
+
+        $staleKeys = [];
+
+        foreach ($filePairs as $filePair) {
+            if ($filePair['source_key'] !== $filePair['target_key']) {
+                $staleKeys[] = $filePair['source_key'];
+            }
+        }
+
+        $deleteError = $this->deleteRemoteKeys($client, $bucket, $staleKeys);
+
+        if ($deleteError instanceof \WP_Error) {
+            update_post_meta($attachmentId, self::ERROR_META_KEY, $deleteError->get_error_message());
+        }
+
+        return true;
+    }
+
+    /**
      * 删除附件时同步删除远端对象。
      *
      * @param int    $attachmentId 附件 ID。
@@ -566,6 +689,273 @@ final class S3MediaModule implements ModuleInterface
     private function hasRemoteMeta(int $attachmentId): bool
     {
         return is_array(get_post_meta($attachmentId, self::REMOTE_META_KEY, true));
+    }
+
+    /**
+     * 获取媒体目录路径服务。
+     */
+    private function pathService(): S3MediaPathService
+    {
+        if (! ($this->pathService instanceof S3MediaPathService)) {
+            $this->pathService = new S3MediaPathService();
+        }
+
+        return $this->pathService;
+    }
+
+    /**
+     * 生成远端移动所需的源对象和目标对象映射。
+     *
+     * @param string              $currentRelativePath 当前主文件相对路径。
+     * @param string              $targetRelativePath  目标主文件相对路径。
+     * @param array<string,mixed> $sourceMetadata      当前附件元数据。
+     * @param array<string,mixed> $targetMetadata      目标附件元数据。
+     * @param array<string,mixed> $remoteFiles         远端文件元数据。
+     *
+     * @return list<array{kind: string, name: string, source_key: string, target_key: string}>
+     */
+    private function remoteFilePairsForMove(string $currentRelativePath, string $targetRelativePath, array $sourceMetadata, array $targetMetadata, array $remoteFiles): array
+    {
+        $filePairs = [
+            [
+                'kind' => 'original',
+                'name' => '',
+                'source_key' => $this->remoteFileKey($remoteFiles, 'original', '', $currentRelativePath),
+                'target_key' => $this->objectKey($targetRelativePath),
+            ],
+        ];
+
+        if (isset($sourceMetadata['sizes']) && is_array($sourceMetadata['sizes'])) {
+            foreach ($sourceMetadata['sizes'] as $sizeName => $sizeData) {
+                if (! is_array($sizeData) || empty($sizeData['file']) || ! is_string($sizeData['file'])) {
+                    continue;
+                }
+
+                $targetSizeFile = isset($targetMetadata['sizes'][$sizeName]['file']) && is_string($targetMetadata['sizes'][$sizeName]['file'])
+                    ? $targetMetadata['sizes'][$sizeName]['file']
+                    : $sizeData['file'];
+
+                $filePairs[] = [
+                    'kind' => 'size',
+                    'name' => (string) $sizeName,
+                    'source_key' => $this->remoteFileKey(
+                        $remoteFiles,
+                        'size',
+                        (string) $sizeName,
+                        $this->relativeSiblingPath($currentRelativePath, $sizeData['file'])
+                    ),
+                    'target_key' => $this->objectKey($this->relativeSiblingPath($targetRelativePath, $targetSizeFile)),
+                ];
+            }
+        }
+
+        if (! empty($sourceMetadata['original_image']) && is_string($sourceMetadata['original_image'])) {
+            $targetOriginalFile = ! empty($targetMetadata['original_image']) && is_string($targetMetadata['original_image'])
+                ? $targetMetadata['original_image']
+                : $sourceMetadata['original_image'];
+
+            $filePairs[] = [
+                'kind' => 'original_image',
+                'name' => '',
+                'source_key' => $this->remoteFileKey(
+                    $remoteFiles,
+                    'original_image',
+                    '',
+                    $this->relativeSiblingPath($currentRelativePath, $sourceMetadata['original_image'])
+                ),
+                'target_key' => $this->objectKey($this->relativeSiblingPath($targetRelativePath, $targetOriginalFile)),
+            ];
+        }
+
+        return array_values(
+            array_filter(
+                $filePairs,
+                static fn (array $filePair): bool => $filePair['source_key'] !== '' && $filePair['target_key'] !== ''
+            )
+        );
+    }
+
+    /**
+     * 生成移动后附件元数据。
+     *
+     * @param array<string,mixed> $metadata            当前附件元数据。
+     * @param string              $currentRelativePath 当前主文件相对路径。
+     * @param string              $targetRelativePath  目标主文件相对路径。
+     *
+     * @return array<string,mixed>
+     */
+    private function metadataForMovedAttachment(array $metadata, string $currentRelativePath, string $targetRelativePath): array
+    {
+        $metadata['file'] = $targetRelativePath;
+
+        if (isset($metadata['sizes']) && is_array($metadata['sizes'])) {
+            foreach ($metadata['sizes'] as $sizeName => $sizeData) {
+                if (! is_array($sizeData) || empty($sizeData['file']) || ! is_string($sizeData['file'])) {
+                    continue;
+                }
+
+                $metadata['sizes'][$sizeName]['file'] = $this->targetSiblingFile($currentRelativePath, $targetRelativePath, $sizeData['file']);
+            }
+        }
+
+        if (! empty($metadata['original_image']) && is_string($metadata['original_image'])) {
+            $metadata['original_image'] = $this->targetSiblingFile($currentRelativePath, $targetRelativePath, $metadata['original_image'], '-original');
+        }
+
+        return $metadata;
+    }
+
+    /**
+     * 根据主文件目标文件名生成派生文件目标文件名。
+     *
+     * @param string $sourceMainRelativePath 源主文件相对路径。
+     * @param string $targetMainRelativePath 目标主文件相对路径。
+     * @param string $sourceSiblingFile      源派生文件名。
+     * @param string $fallbackSuffix         无法按源主文件前缀替换时使用的后缀。
+     */
+    private function targetSiblingFile(string $sourceMainRelativePath, string $targetMainRelativePath, string $sourceSiblingFile, string $fallbackSuffix = ''): string
+    {
+        $sourceFile = wp_basename($sourceSiblingFile);
+        $sourceMainBase = pathinfo(wp_basename($sourceMainRelativePath), PATHINFO_FILENAME);
+        $targetMainBase = pathinfo(wp_basename($targetMainRelativePath), PATHINFO_FILENAME);
+
+        if ($sourceMainBase === '' || $targetMainBase === '' || $sourceMainBase === $targetMainBase) {
+            return $sourceFile;
+        }
+
+        if (str_starts_with($sourceFile, $sourceMainBase . '-')) {
+            return $targetMainBase . substr($sourceFile, strlen($sourceMainBase));
+        }
+
+        if ($fallbackSuffix === '') {
+            return $sourceFile;
+        }
+
+        $extension = pathinfo($sourceFile, PATHINFO_EXTENSION);
+
+        return $targetMainBase . $fallbackSuffix . ($extension !== '' ? '.' . $extension : '');
+    }
+
+    /**
+     * 读取远端文件 Key，缺失时根据相对路径回退生成。
+     *
+     * @param array<string,mixed> $remoteFiles  远端文件元数据。
+     * @param string              $kind         文件类型。
+     * @param string              $sizeName     图片尺寸名称。
+     * @param string              $relativePath 文件相对路径。
+     */
+    private function remoteFileKey(array $remoteFiles, string $kind, string $sizeName, string $relativePath): string
+    {
+        if ($kind === 'size') {
+            $key = $remoteFiles['sizes'][$sizeName] ?? '';
+
+            return is_string($key) && $key !== '' ? $key : $this->objectKey($relativePath);
+        }
+
+        $key = $remoteFiles[$kind] ?? '';
+
+        return is_string($key) && $key !== '' ? $key : $this->objectKey($relativePath);
+    }
+
+    /**
+     * 将移动后的远端 Key 写回远端文件元数据。
+     *
+     * @param array<string,mixed> $remoteFiles 远端文件元数据。
+     * @param list<array{kind: string, name: string, source_key: string, target_key: string}> $filePairs 移动文件映射。
+     *
+     * @return array<string,mixed>
+     */
+    private function applyMovedRemoteFileKeys(array $remoteFiles, array $filePairs): array
+    {
+        foreach ($filePairs as $filePair) {
+            if ($filePair['kind'] === 'size') {
+                if (! isset($remoteFiles['sizes']) || ! is_array($remoteFiles['sizes'])) {
+                    $remoteFiles['sizes'] = [];
+                }
+
+                $remoteFiles['sizes'][$filePair['name']] = $filePair['target_key'];
+                continue;
+            }
+
+            $remoteFiles[$filePair['kind']] = $filePair['target_key'];
+        }
+
+        return $remoteFiles;
+    }
+
+    /**
+     * 复制远端对象。
+     *
+     * @param S3Client $client    S3 客户端。
+     * @param string   $bucket    Bucket 名称。
+     * @param string   $sourceKey 源对象 Key。
+     * @param string   $targetKey 目标对象 Key。
+     */
+    private function copyRemoteObject(S3Client $client, string $bucket, string $sourceKey, string $targetKey): ?\WP_Error
+    {
+        if ($sourceKey === $targetKey) {
+            return null;
+        }
+
+        try {
+            $client->copyObject(
+                [
+                    'Bucket' => $bucket,
+                    'CopySource' => $this->copySource($bucket, $sourceKey),
+                    'Key' => $targetKey,
+                ]
+            );
+        } catch (Throwable $throwable) {
+            return new \WP_Error('purepress_s3_copy_failed', 'PurePress 移动远端媒体文件失败：' . $throwable->getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * 删除远端对象 Key。
+     *
+     * @param S3Client    $client S3 客户端。
+     * @param string      $bucket Bucket 名称。
+     * @param list<string> $keys  对象 Key 列表。
+     */
+    private function deleteRemoteKeys(S3Client $client, string $bucket, array $keys): ?\WP_Error
+    {
+        $keys = array_values(array_unique(array_filter($keys, static fn (string $key): bool => $key !== '')));
+
+        if ([] === $keys) {
+            return null;
+        }
+
+        try {
+            $client->deleteObjects(
+                [
+                    'Bucket' => $bucket,
+                    'Delete' => [
+                        'Objects' => array_map(
+                            static fn (string $key): array => ['Key' => $key],
+                            $keys
+                        ),
+                        'Quiet' => true,
+                    ],
+                ]
+            );
+        } catch (Throwable $throwable) {
+            return new \WP_Error('purepress_s3_delete_failed', 'PurePress 清理旧远端媒体文件失败：' . $throwable->getMessage());
+        }
+
+        return null;
+    }
+
+    /**
+     * 生成 S3 CopySource 值。
+     *
+     * @param string $bucket Bucket 名称。
+     * @param string $key    对象 Key。
+     */
+    private function copySource(string $bucket, string $key): string
+    {
+        return str_replace('%2F', '/', rawurlencode($bucket . '/' . $key));
     }
 
     /**
