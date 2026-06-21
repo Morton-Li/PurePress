@@ -3,7 +3,7 @@
  * Plugin Name: PurePress
  * Plugin URI: https://github.com/Morton-Li/PurePress
  * Description: 面向 WordPress 的统一治理、体验优化、能力增强与基础设施集成插件。
- * Version: 1.1.0
+ * Version: 1.2.0
  * Requires PHP: 8.5
  * Author: Morton Li
  * License: GPL-3.0-only
@@ -27,7 +27,7 @@ if (! defined('ABSPATH')) {
     exit;
 }
 
-define('PUREPRESS_VERSION', '1.1.0');
+define('PUREPRESS_VERSION', '1.2.0');
 define('PUREPRESS_FILE', __FILE__);
 define('PUREPRESS_PATH', plugin_dir_path(__FILE__));
 
@@ -55,6 +55,7 @@ if (is_readable($purepressAutoload)) {
 }
 
 register_activation_hook(PUREPRESS_FILE, [PurePress\Lifecycle\Installer::class, 'activate']);
+register_deactivation_hook(PUREPRESS_FILE, [PurePress\Lifecycle\Deactivator::class, 'deactivate']);
 register_uninstall_hook(PUREPRESS_FILE, [PurePress\Lifecycle\Uninstaller::class, 'uninstall']);
 
 add_action(

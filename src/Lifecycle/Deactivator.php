@@ -1,6 +1,6 @@
 <?php
 /**
- * PurePress 插件激活处理。
+ * PurePress 插件停用处理。
  *
  * Copyright (C) 2026 Morton Li
  *
@@ -14,20 +14,18 @@ declare(strict_types=1);
 namespace PurePress\Lifecycle;
 
 use PurePress\Configuration\OptionRepository;
-use PurePress\Configuration\OptionSynchronizer;
 use PurePress\Governance\LoginAddressModule;
 
-final class Installer
+final class Deactivator
 {
     /**
-     * 插件激活时同步当前版本配置记录。
+     * 插件停用时清理登录入口重写规则。
      */
-    public static function activate(): void
+    public static function deactivate(): void
     {
         $options = new OptionRepository();
 
-        (new OptionSynchronizer($options))->sync();
-        LoginAddressModule::addRewriteRulesForSettings(
+        LoginAddressModule::removeRewriteRulesForSettings(
             $options->moduleSettings(LoginAddressModule::MODULE_ID)
         );
 
