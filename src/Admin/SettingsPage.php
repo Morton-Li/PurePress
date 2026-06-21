@@ -16,11 +16,13 @@ namespace PurePress\Admin;
 use PurePress\Configuration\ModuleCatalog;
 use PurePress\Configuration\ModuleDefinition;
 use PurePress\Configuration\OptionRepository;
+use PurePress\Governance\LoginAddressModule;
 use PurePress\Support\HookRegistry;
 
 final class SettingsPage
 {
     private const string PAGE_SLUG = 'purepress';
+    private const string LOGIN_ADDRESS_MODULE_ID = 'governance.login_address';
     private const string SMTP_MODULE_ID = 'enhancement.smtp';
     private const string S3_MEDIA_MODULE_ID = 'integration.s3_media';
 
@@ -97,6 +99,7 @@ final class SettingsPage
         $moduleIds = $this->submittedModuleIds();
         $allowedModuleIds = $this->moduleIdsForGroup($group);
 
+        $this->validateSubmittedModuleSettings($allowedModuleIds);
         $this->options->saveModuleStates($moduleIds, $allowedModuleIds);
         $this->saveSubmittedModuleSettings($allowedModuleIds);
 
@@ -302,15 +305,19 @@ final class SettingsPage
                         <div class="purepress-module__layout <?php echo $module->hasAdditionalInfo() ? 'purepress-module__layout--with-info' : ''; ?>">
                             <div>
                                 <p class="purepress-module__description"><?php echo esc_html($module->description()); ?></p>
-                                <label>
-                                    <input
-                                        type="checkbox"
-                                        name="modules[]"
-                                        value="<?php echo esc_attr($module->id()); ?>"
-                                        <?php checked($enabled); ?>
-                                    >
-                                    启用
-                                </label>
+                                <?php if ($module->id() === self::LOGIN_ADDRESS_MODULE_ID) : ?>
+                                    <input type="hidden" name="modules[]" value="<?php echo esc_attr($module->id()); ?>">
+                                <?php else : ?>
+                                    <label>
+                                        <input
+                                            type="checkbox"
+                                            name="modules[]"
+                                            value="<?php echo esc_attr($module->id()); ?>"
+                                            <?php checked($enabled); ?>
+                                        >
+                                        启用
+                                    </label>
+                                <?php endif; ?>
                                 <?php $this->renderModuleFields($module, $settings['modules'][$module->id()] ?? []); ?>
                             </div>
 
@@ -381,6 +388,21 @@ final class SettingsPage
      */
     private function saveSubmittedModuleSettings(array $allowedModuleIds): void
     {
+        if (in_array(self::LOGIN_ADDRESS_MODULE_ID, $allowedModuleIds, true)) {
+            $loginAddressSettings = $this->submittedLoginAddressSettings();
+            $currentSettings = $this->options->moduleSettings(self::LOGIN_ADDRESS_MODULE_ID);
+
+            $this->options->saveModuleSettings(self::LOGIN_ADDRESS_MODULE_ID, $loginAddressSettings);
+
+            if (
+                (string) ($currentSettings['mode'] ?? '') !== $loginAddressSettings['mode']
+                || (string) ($currentSettings['login_path'] ?? '') !== $loginAddressSettings['login_path']
+                || (string) ($currentSettings['signup_path'] ?? '') !== $loginAddressSettings['signup_path']
+            ) {
+                $this->refreshLoginAddressRewriteRules($loginAddressSettings, $currentSettings);
+            }
+        }
+
         if (in_array(self::SMTP_MODULE_ID, $allowedModuleIds, true)) {
             $smtpSettings = $this->submittedSmtpSettings();
 
@@ -396,6 +418,69 @@ final class SettingsPage
                 $this->options->saveModuleSettings(self::S3_MEDIA_MODULE_ID, $s3Settings);
             }
         }
+    }
+
+    /**
+     * 在写入任何模块配置前验证当前标签页提交内容。
+     *
+     * @param list<string> $allowedModuleIds 当前标签页允许保存的模块 ID。
+     */
+    private function validateSubmittedModuleSettings(array $allowedModuleIds): void
+    {
+        if (in_array(self::LOGIN_ADDRESS_MODULE_ID, $allowedModuleIds, true)) {
+            $this->submittedLoginAddressSettings();
+        }
+    }
+
+    /**
+     * 读取并清洗登录入口控制配置。
+     *
+     * @return array{mode: string, login_path: string, signup_path: string}
+     */
+    private function submittedLoginAddressSettings(): array
+    {
+        $rawSettings = $_POST['module_settings'][self::LOGIN_ADDRESS_MODULE_ID] ?? [];
+
+        if (! is_array($rawSettings)) {
+            $rawSettings = [];
+        }
+
+        if (function_exists('wp_unslash')) {
+            $rawSettings = wp_unslash($rawSettings);
+        }
+
+        $mode = is_scalar($rawSettings['mode'] ?? null) ? (string) $rawSettings['mode'] : LoginAddressModule::MODE_DEFAULT;
+        $mode = in_array(
+            $mode,
+            [
+                LoginAddressModule::MODE_DEFAULT,
+                LoginAddressModule::MODE_DISABLED,
+                LoginAddressModule::MODE_CUSTOM,
+            ],
+            true
+        ) ? $mode : LoginAddressModule::MODE_DEFAULT;
+        $loginPath = $this->sanitizeEntryPath($rawSettings['login_path'] ?? 'login');
+        $signupPath = $this->sanitizeEntryPath($rawSettings['signup_path'] ?? 'signup');
+
+        if ($mode === LoginAddressModule::MODE_CUSTOM) {
+            if ($loginPath === '' || $signupPath === '') {
+                wp_die('登录地址和注册地址必须是有效的站内相对路径。');
+            }
+
+            if ($loginPath === $signupPath) {
+                wp_die('登录地址和注册地址不能相同。');
+            }
+
+            if ($this->isReservedEntryPath($loginPath) || $this->isReservedEntryPath($signupPath)) {
+                wp_die('登录地址或注册地址使用了 WordPress 保留路径。');
+            }
+        }
+
+        return [
+            'mode' => $mode,
+            'login_path' => $loginPath !== '' ? $loginPath : 'login',
+            'signup_path' => $signupPath !== '' ? $signupPath : 'signup',
+        ];
     }
 
     /**
@@ -590,6 +675,95 @@ final class SettingsPage
     }
 
     /**
+     * 清洗登录或注册地址。
+     *
+     * 支持 `/login`、`/login/` 和 `login` 三种输入形式，并统一保存为 `login`。
+     *
+     * @param mixed $value 原始路径值。
+     */
+    private function sanitizeEntryPath(mixed $value): string
+    {
+        $path = is_scalar($value) ? trim((string) $value) : '';
+
+        if ($path === '' || str_contains($path, "\0") || str_contains($path, '..')) {
+            return '';
+        }
+
+        $parsed = wp_parse_url($path);
+
+        if (
+            false === $parsed
+            || isset($parsed['scheme'])
+            || isset($parsed['host'])
+            || isset($parsed['query'])
+            || isset($parsed['fragment'])
+        ) {
+            return '';
+        }
+
+        $path = isset($parsed['path']) && is_string($parsed['path']) ? $parsed['path'] : '';
+        $path = trim((string) preg_replace('#/+#', '/', str_replace('\\', '/', $path)), '/');
+
+        if ($path === '') {
+            return '';
+        }
+
+        $segments = explode('/', strtolower($path));
+
+        foreach ($segments as $segment) {
+            if ($segment === '' || ! preg_match('/^[a-z0-9_-]+$/', $segment)) {
+                return '';
+            }
+        }
+
+        return implode('/', $segments);
+    }
+
+    /**
+     * 判断登录或注册地址是否占用 WordPress 保留路径。
+     *
+     * @param string $path 已清洗的相对路径。
+     */
+    private function isReservedEntryPath(string $path): bool
+    {
+        $firstSegment = explode('/', $path)[0];
+
+        return in_array(
+            $firstSegment,
+            [
+                'admin',
+                'dashboard',
+                'index',
+                'wp-admin',
+                'wp-content',
+                'wp-includes',
+                'wp-json',
+                'wp-login',
+                'wp-signup',
+                'wp-register',
+                'xmlrpc',
+            ],
+            true
+        );
+    }
+
+    /**
+     * 根据最新配置刷新登录与注册地址重写规则。
+     *
+     * @param array{mode: string, login_path: string, signup_path: string} $settings        最新登录入口配置。
+     * @param array<string,mixed>                                         $currentSettings 保存前登录入口配置。
+     */
+    private function refreshLoginAddressRewriteRules(array $settings, array $currentSettings): void
+    {
+        LoginAddressModule::removeRewriteRulesForSettings($currentSettings);
+        LoginAddressModule::addRewriteRulesForSettings($settings);
+
+        if (function_exists('flush_rewrite_rules')) {
+            flush_rewrite_rules(false);
+        }
+    }
+
+    /**
      * 清洗 SMTP 端口。
      *
      * @param mixed $value 原始端口值。
@@ -717,6 +891,11 @@ final class SettingsPage
      */
     private function renderModuleFields(ModuleDefinition $module, array $moduleSettings): void
     {
+        if ($module->id() === self::LOGIN_ADDRESS_MODULE_ID) {
+            $this->renderLoginAddressFields($moduleSettings);
+            return;
+        }
+
         if ($module->id() === self::SMTP_MODULE_ID) {
             $this->renderSmtpFields($moduleSettings);
             return;
@@ -725,6 +904,71 @@ final class SettingsPage
         if ($module->id() === self::S3_MEDIA_MODULE_ID) {
             $this->renderS3MediaFields($moduleSettings);
         }
+    }
+
+    /**
+     * 渲染登录入口控制配置字段。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function renderLoginAddressFields(array $moduleSettings): void
+    {
+        $fieldPrefix = 'module_settings[' . self::LOGIN_ADDRESS_MODULE_ID . ']';
+        $mode = (string) ($moduleSettings['mode'] ?? LoginAddressModule::MODE_DEFAULT);
+        $customMode = $mode === LoginAddressModule::MODE_CUSTOM;
+        ?>
+        <div class="purepress-module__fields">
+            <label for="purepress-login-address-mode">模式</label>
+            <select id="purepress-login-address-mode" name="<?php echo esc_attr($fieldPrefix); ?>[mode]">
+                <option value="<?php echo esc_attr(LoginAddressModule::MODE_DEFAULT); ?>" <?php selected($mode, LoginAddressModule::MODE_DEFAULT); ?>>默认</option>
+                <option value="<?php echo esc_attr(LoginAddressModule::MODE_DISABLED); ?>" <?php selected($mode, LoginAddressModule::MODE_DISABLED); ?>>关闭默认入口</option>
+                <option value="<?php echo esc_attr(LoginAddressModule::MODE_CUSTOM); ?>" <?php selected($mode, LoginAddressModule::MODE_CUSTOM); ?>>自定义地址</option>
+            </select>
+
+            <label class="purepress-login-address-custom-field" for="purepress-login-path" <?php echo $customMode ? '' : 'hidden'; ?>>登录地址</label>
+            <input
+                class="purepress-login-address-custom-field"
+                id="purepress-login-path"
+                type="text"
+                name="<?php echo esc_attr($fieldPrefix); ?>[login_path]"
+                value="<?php echo esc_attr('/' . trim((string) ($moduleSettings['login_path'] ?? 'login'), '/')); ?>"
+                placeholder="/login"
+                <?php echo $customMode ? '' : 'hidden'; ?>
+            >
+
+            <label class="purepress-login-address-custom-field" for="purepress-signup-path" <?php echo $customMode ? '' : 'hidden'; ?>>注册地址</label>
+            <input
+                class="purepress-login-address-custom-field"
+                id="purepress-signup-path"
+                type="text"
+                name="<?php echo esc_attr($fieldPrefix); ?>[signup_path]"
+                value="<?php echo esc_attr('/' . trim((string) ($moduleSettings['signup_path'] ?? 'signup'), '/')); ?>"
+                placeholder="/signup"
+                <?php echo $customMode ? '' : 'hidden'; ?>
+            >
+        </div>
+        <script>
+            (function () {
+                var mode = document.getElementById('purepress-login-address-mode');
+                var fields = document.querySelectorAll('.purepress-login-address-custom-field');
+
+                if (!mode) {
+                    return;
+                }
+
+                function updateFields() {
+                    var hidden = mode.value !== '<?php echo esc_js(LoginAddressModule::MODE_CUSTOM); ?>';
+
+                    fields.forEach(function (field) {
+                        field.hidden = hidden;
+                    });
+                }
+
+                mode.addEventListener('change', updateFields);
+                updateFields();
+            }());
+        </script>
+        <?php
     }
 
     /**
