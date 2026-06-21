@@ -15,6 +15,7 @@ namespace PurePress\Configuration;
 
 use PurePress\Enhancement\MediaFoldersModule;
 use PurePress\Enhancement\SmtpModule;
+use PurePress\Governance\LoginAddressModule;
 use PurePress\Governance\RestApiModule;
 use PurePress\Governance\WordPressFingerprintModule;
 use PurePress\Governance\XmlRpcModule;
@@ -60,6 +61,13 @@ location ~ ^/themes/(.+)$ {
     try_files /wp-content/themes/$1 =404;
 }
 NGINX
+            ),
+            new ModuleDefinition(
+                'governance.login_address',
+                '登录入口控制',
+                'Governance',
+                '管理 WordPress 默认登录与注册地址。',
+                LoginAddressModule::class
             ),
             new ModuleDefinition(
                 'enhancement.smtp',

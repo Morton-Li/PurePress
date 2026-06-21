@@ -30,6 +30,12 @@ final class Defaults
         'governance.wordpress_fingerprint' => [
             'enabled' => false,
         ],
+        'governance.login_address' => [
+            'enabled' => true,
+            'mode' => 'default',
+            'login_path' => 'login',
+            'signup_path' => 'signup',
+        ],
         'enhancement.smtp' => [
             'enabled' => false,
             'host' => '',
