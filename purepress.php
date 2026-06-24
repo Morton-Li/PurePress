@@ -4,6 +4,8 @@
  * Plugin URI: https://github.com/Morton-Li/PurePress
  * Description: 面向 WordPress 的统一治理、体验优化、能力增强与基础设施集成插件。
  * Version: 1.2.0
+ * Requires at least: 7.0
+ * Tested up to: 7.0
  * Requires PHP: 8.5
  * Author: Morton Li
  * License: GPL-3.0-only
