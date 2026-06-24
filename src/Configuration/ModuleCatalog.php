@@ -51,8 +51,20 @@ final class ModuleCatalog
                 'Governance',
                 '隐藏常见 WordPress 识别特征，降低自动化信息收集暴露面。',
                 WordPressFingerprintModule::class,
-                '启用资源路径隐藏后，PurePress 会将前台核心资源输出为 /core/...，主题资源输出为 /themes/...。为避免这些公开路径进入 PHP，建议在 Nginx server 块中增加静态重写规则。',
+                '启用后，PurePress 会将前台核心资源输出为 /core/...，主题资源输出为 /themes/...，将后台地址输出为 /console/...，并建议在 Nginx server 块中屏蔽 /wp-admin 直访、补充公开路径重写规则。',
                 <<<'NGINX'
+if ($request_uri ~* "^/wp-admin(?:/|\?|$)") {
+    return 404;
+}
+
+location = /console {
+    return 301 /console/;
+}
+
+location ^~ /console/ {
+    rewrite ^/console/(.*)$ /wp-admin/$1 last;
+}
+
 location ~ ^/core/(.+)$ {
     try_files /wp-includes/$1 =404;
 }
