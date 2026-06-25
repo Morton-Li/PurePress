@@ -36,6 +36,9 @@ final class Defaults
             'login_path' => 'login',
             'signup_path' => 'signup',
         ],
+        'governance.login_audit' => [
+            'enabled' => false,
+        ],
         'enhancement.smtp' => [
             'enabled' => false,
             'host' => '',

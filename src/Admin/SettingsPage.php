@@ -16,13 +16,16 @@ namespace PurePress\Admin;
 use PurePress\Configuration\ModuleCatalog;
 use PurePress\Configuration\ModuleDefinition;
 use PurePress\Configuration\OptionRepository;
+use PurePress\Governance\GeoIpDatabase;
 use PurePress\Governance\LoginAddressModule;
+use PurePress\Governance\LoginAuditModule;
 use PurePress\Support\HookRegistry;
 
 final class SettingsPage
 {
     private const string PAGE_SLUG = 'purepress';
-    private const string LOGIN_ADDRESS_MODULE_ID = 'governance.login_address';
+    private const string LOGIN_ADDRESS_MODULE_ID = LoginAddressModule::MODULE_ID;
+    private const string LOGIN_AUDIT_MODULE_ID = LoginAuditModule::MODULE_ID;
     private const string SMTP_MODULE_ID = 'enhancement.smtp';
     private const string S3_MEDIA_MODULE_ID = 'integration.s3_media';
 
@@ -68,6 +71,7 @@ final class SettingsPage
         $hooks->action('admin_menu', [$this, 'registerMenu']);
         $hooks->action('admin_post_purepress_save_settings', [$this, 'save']);
         $hooks->action('admin_post_purepress_send_test_email', [$this, 'sendTestEmail']);
+        $hooks->action('admin_post_purepress_update_geoip_database', [$this, 'updateGeoIpDatabase']);
     }
 
     /**
@@ -152,6 +156,36 @@ final class SettingsPage
                     'page' => self::PAGE_SLUG,
                     'purepress_tab' => 'Enhancement',
                     'purepress_test_mail' => $result,
+                ],
+                admin_url('options-general.php')
+            )
+        );
+        exit;
+    }
+
+    /**
+     * 更新 GeoIP 本地数据库。
+     */
+    public function updateGeoIpDatabase(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('你没有权限更新 PurePress GeoIP 数据库。');
+        }
+
+        check_admin_referer('purepress_update_geoip_database');
+
+        if (! $this->options->isModuleEnabled(self::LOGIN_AUDIT_MODULE_ID)) {
+            $result = 'disabled';
+        } else {
+            $result = (new GeoIpDatabase())->update()['success'] ? 'updated' : 'failed';
+        }
+
+        wp_safe_redirect(
+            add_query_arg(
+                [
+                    'page' => self::PAGE_SLUG,
+                    'purepress_tab' => 'Governance',
+                    'purepress_geoip' => $result,
                 ],
                 admin_url('options-general.php')
             )
@@ -275,6 +309,7 @@ final class SettingsPage
             <?php endif; ?>
 
             <?php $this->renderTestMailNotice(); ?>
+            <?php $this->renderGeoIpNotice(); ?>
 
             <p>PurePress 的所有能力都通过模块独立启用。默认情况下，功能模块保持关闭，由你按站点需要逐步打开。</p>
 
@@ -343,6 +378,13 @@ final class SettingsPage
                 <form id="purepress-smtp-test-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                     <?php wp_nonce_field('purepress_send_test_email'); ?>
                     <input type="hidden" name="action" value="purepress_send_test_email">
+                </form>
+            <?php endif; ?>
+
+            <?php if ($activeGroup === 'Governance' && $this->hasModule($modules, self::LOGIN_AUDIT_MODULE_ID) && (bool) ($settings['modules'][self::LOGIN_AUDIT_MODULE_ID]['enabled'] ?? false)) : ?>
+                <form id="purepress-geoip-update-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <?php wp_nonce_field('purepress_update_geoip_database'); ?>
+                    <input type="hidden" name="action" value="purepress_update_geoip_database">
                 </form>
             <?php endif; ?>
         </div>
@@ -896,6 +938,11 @@ final class SettingsPage
             return;
         }
 
+        if ($module->id() === self::LOGIN_AUDIT_MODULE_ID) {
+            $this->renderLoginAuditFields($moduleSettings);
+            return;
+        }
+
         if ($module->id() === self::SMTP_MODULE_ID) {
             $this->renderSmtpFields($moduleSettings);
             return;
@@ -968,6 +1015,36 @@ final class SettingsPage
                 updateFields();
             }());
         </script>
+        <?php
+    }
+
+    /**
+     * 渲染登录审计配置字段。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function renderLoginAuditFields(array $moduleSettings): void
+    {
+        $enabled = (bool) ($moduleSettings['enabled'] ?? false);
+        $status = (new GeoIpDatabase())->status();
+        ?>
+        <div class="purepress-module__actions">
+            <?php if ($enabled) : ?>
+                <?php if ($status['exists']) : ?>
+                    <p class="purepress-module__description">
+                        GeoIP 数据库已存在，最后更新：<?php echo esc_html($this->formattedGeoIpUpdatedAt($status['updated_at'])); ?>，文件大小：<?php echo esc_html($this->formattedFileSize($status['size'])); ?>。
+                    </p>
+                <?php else : ?>
+                    <p class="purepress-module__description">GeoIP 数据库不存在，无法解析 IP 归属地。登录审计仍会记录最后登录时间和 IP。</p>
+                <?php endif; ?>
+                <p class="purepress-module__description">GeoLite2 数据由 MaxMind 提供。</p>
+                <p>
+                    <button class="button button-secondary" type="submit" form="purepress-geoip-update-form">更新 GeoIP 数据库</button>
+                </p>
+            <?php else : ?>
+                <p class="purepress-module__description">启用并保存后，可以更新 GeoIP 数据库并解析最后登录位置。</p>
+            <?php endif; ?>
+        </div>
         <?php
     }
 
@@ -1133,5 +1210,68 @@ final class SettingsPage
             <p><?php echo esc_html($message); ?></p>
         </div>
         <?php
+    }
+
+    /**
+     * 渲染 GeoIP 数据库更新结果提示。
+     */
+    private function renderGeoIpNotice(): void
+    {
+        $result = $_GET['purepress_geoip'] ?? '';
+
+        if (! is_scalar($result) || $result === '') {
+            return;
+        }
+
+        $messages = [
+            'updated' => ['notice-success', 'GeoIP 数据库已更新。'],
+            'failed' => ['notice-error', 'GeoIP 数据库更新失败，请稍后重试或检查服务器网络。'],
+            'disabled' => ['notice-warning', '登录审计模块未启用，无法更新 GeoIP 数据库。'],
+        ];
+
+        $result = (string) $result;
+
+        if (! isset($messages[$result])) {
+            return;
+        }
+
+        [$className, $message] = $messages[$result];
+        ?>
+        <div class="notice <?php echo esc_attr($className); ?> is-dismissible">
+            <p><?php echo esc_html($message); ?></p>
+        </div>
+        <?php
+    }
+
+    /**
+     * 格式化 GeoIP 数据库更新时间。
+     *
+     * @param int|null $timestamp 更新时间戳。
+     */
+    private function formattedGeoIpUpdatedAt(?int $timestamp): string
+    {
+        if (! is_int($timestamp) || $timestamp <= 0) {
+            return '未知';
+        }
+
+        $format = trim((string) get_option('date_format') . ' ' . (string) get_option('time_format'));
+
+        return function_exists('wp_date')
+            ? wp_date($format, $timestamp)
+            : date_i18n($format, $timestamp);
+    }
+
+    /**
+     * 格式化文件大小。
+     *
+     * @param int $size 文件字节数。
+     */
+    private function formattedFileSize(int $size): string
+    {
+        if ($size <= 0) {
+            return '0 B';
+        }
+
+        return function_exists('size_format') ? size_format($size, 2) : number_format($size) . ' B';
     }
 }

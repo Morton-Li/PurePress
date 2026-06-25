@@ -14,6 +14,7 @@ declare(strict_types=1);
 namespace PurePress\Lifecycle;
 
 use PurePress\Configuration\OptionKeys;
+use PurePress\Governance\GeoIpDatabase;
 
 final class Uninstaller
 {
@@ -23,6 +24,8 @@ final class Uninstaller
     public static function uninstall(): void
     {
         global $wpdb;
+
+        GeoIpDatabase::deleteDataRoot();
 
         if (
             ! isset($wpdb)
