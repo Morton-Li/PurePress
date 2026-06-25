@@ -15,6 +15,8 @@ namespace PurePress\Lifecycle;
 
 use PurePress\Configuration\OptionKeys;
 use PurePress\Governance\GeoIpDatabase;
+use PurePress\Governance\RegistrationEmailVerificationStore;
+use PurePress\Governance\RegistrationRateLimitStore;
 
 final class Uninstaller
 {
@@ -26,6 +28,8 @@ final class Uninstaller
         global $wpdb;
 
         GeoIpDatabase::deleteDataRoot();
+        RegistrationEmailVerificationStore::uninstall();
+        RegistrationRateLimitStore::uninstall();
 
         if (
             ! isset($wpdb)
