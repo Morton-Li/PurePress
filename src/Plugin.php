@@ -18,6 +18,7 @@ use PurePress\Configuration\ModuleCatalog;
 use PurePress\Configuration\OptionRepository;
 use PurePress\Configuration\OptionSynchronizer;
 use PurePress\Contracts\ModuleInterface;
+use PurePress\Governance\RegistrationEmailVerificationStore;
 use PurePress\Support\HookRegistry;
 
 final class Plugin
@@ -64,6 +65,11 @@ final class Plugin
 
         $hooks = new HookRegistry();
         $options = new OptionRepository();
+
+        $hooks->action(
+            RegistrationEmailVerificationStore::CLEANUP_HOOK,
+            [RegistrationEmailVerificationStore::class, 'deleteExpiredStatic']
+        );
 
         if ($options->storedVersion() !== PUREPRESS_VERSION) {
             new OptionSynchronizer($options)->sync();

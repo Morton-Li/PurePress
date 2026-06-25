@@ -39,6 +39,17 @@ final class Defaults
         'governance.login_audit' => [
             'enabled' => false,
         ],
+        'governance.registration_rate_limit' => [
+            'enabled' => false,
+            'email_limit' => 8,
+            'email_window_minutes' => 30,
+            'ip_limit' => 20,
+            'ip_window_minutes' => 60,
+        ],
+        'governance.registration_email_verification' => [
+            'enabled' => false,
+            'expiration_minutes' => 60,
+        ],
         'enhancement.smtp' => [
             'enabled' => false,
             'host' => '',

@@ -16,6 +16,8 @@ namespace PurePress\Lifecycle;
 use PurePress\Configuration\OptionRepository;
 use PurePress\Configuration\OptionSynchronizer;
 use PurePress\Governance\LoginAddressModule;
+use PurePress\Governance\RegistrationEmailVerificationStore;
+use PurePress\Governance\RegistrationRateLimitStore;
 
 final class Installer
 {
@@ -27,6 +29,9 @@ final class Installer
         $options = new OptionRepository();
 
         (new OptionSynchronizer($options))->sync();
+        RegistrationEmailVerificationStore::install();
+        RegistrationEmailVerificationStore::scheduleCleanup();
+        RegistrationRateLimitStore::install();
         LoginAddressModule::addRewriteRulesForSettings(
             $options->moduleSettings(LoginAddressModule::MODULE_ID)
         );

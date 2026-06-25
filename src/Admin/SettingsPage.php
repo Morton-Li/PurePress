@@ -19,6 +19,8 @@ use PurePress\Configuration\OptionRepository;
 use PurePress\Governance\GeoIpDatabase;
 use PurePress\Governance\LoginAddressModule;
 use PurePress\Governance\LoginAuditModule;
+use PurePress\Governance\RegistrationEmailVerificationModule;
+use PurePress\Governance\RegistrationRateLimitModule;
 use PurePress\Support\HookRegistry;
 
 final class SettingsPage
@@ -26,6 +28,8 @@ final class SettingsPage
     private const string PAGE_SLUG = 'purepress';
     private const string LOGIN_ADDRESS_MODULE_ID = LoginAddressModule::MODULE_ID;
     private const string LOGIN_AUDIT_MODULE_ID = LoginAuditModule::MODULE_ID;
+    private const string REGISTRATION_EMAIL_VERIFICATION_MODULE_ID = RegistrationEmailVerificationModule::MODULE_ID;
+    private const string REGISTRATION_RATE_LIMIT_MODULE_ID = RegistrationRateLimitModule::MODULE_ID;
     private const string SMTP_MODULE_ID = 'enhancement.smtp';
     private const string S3_MEDIA_MODULE_ID = 'integration.s3_media';
 
@@ -460,6 +464,20 @@ final class SettingsPage
                 $this->options->saveModuleSettings(self::S3_MEDIA_MODULE_ID, $s3Settings);
             }
         }
+
+        if (in_array(self::REGISTRATION_RATE_LIMIT_MODULE_ID, $allowedModuleIds, true)) {
+            $this->options->saveModuleSettings(
+                self::REGISTRATION_RATE_LIMIT_MODULE_ID,
+                $this->submittedRegistrationRateLimitSettings()
+            );
+        }
+
+        if (in_array(self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID, $allowedModuleIds, true)) {
+            $this->options->saveModuleSettings(
+                self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID,
+                $this->submittedRegistrationEmailVerificationSettings()
+            );
+        }
     }
 
     /**
@@ -591,6 +609,53 @@ final class SettingsPage
     }
 
     /**
+     * 读取并清洗注册频率限制配置。
+     *
+     * @return array{email_limit: int, email_window_minutes: int, ip_limit: int, ip_window_minutes: int}
+     */
+    private function submittedRegistrationRateLimitSettings(): array
+    {
+        $rawSettings = $_POST['module_settings'][self::REGISTRATION_RATE_LIMIT_MODULE_ID] ?? [];
+
+        if (! is_array($rawSettings)) {
+            $rawSettings = [];
+        }
+
+        if (function_exists('wp_unslash')) {
+            $rawSettings = wp_unslash($rawSettings);
+        }
+
+        return [
+            'email_limit' => $this->sanitizePositiveInteger($rawSettings['email_limit'] ?? 8, 8, 1, 1000),
+            'email_window_minutes' => $this->sanitizePositiveInteger($rawSettings['email_window_minutes'] ?? 30, 30, 1, 1440),
+            'ip_limit' => $this->sanitizePositiveInteger($rawSettings['ip_limit'] ?? 20, 20, 1, 10000),
+            'ip_window_minutes' => $this->sanitizePositiveInteger($rawSettings['ip_window_minutes'] ?? 60, 60, 1, 1440),
+        ];
+    }
+
+    /**
+     * 读取并清洗注册邮箱验证配置。
+     *
+     * @return array{expiration_minutes: int}
+     */
+    private function submittedRegistrationEmailVerificationSettings(): array
+    {
+        $rawSettings = $_POST['module_settings'][self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID] ?? [];
+
+        if (! is_array($rawSettings)) {
+            $rawSettings = [];
+        }
+
+        if (function_exists('wp_unslash')) {
+            $rawSettings = wp_unslash($rawSettings);
+        }
+
+        return [
+            'expiration_minutes' => $this->sanitizePositiveInteger($rawSettings['expiration_minutes'] ?? 60, 60, 5, 1440),
+        ];
+    }
+
+    /**
      * 读取并清洗测试邮件收件人。
      */
     private function submittedTestEmail(): string
@@ -714,6 +779,29 @@ final class SettingsPage
         $path = trim((string) $path, '/');
 
         return str_replace(["\0", '..'], '', $path);
+    }
+
+    /**
+     * 清洗正整数配置值。
+     *
+     * @param mixed $value   原始数值。
+     * @param int   $default 默认值。
+     * @param int   $min     最小允许值。
+     * @param int   $max     最大允许值。
+     */
+    private function sanitizePositiveInteger(mixed $value, int $default, int $min, int $max): int
+    {
+        $number = is_numeric($value) ? (int) $value : $default;
+
+        if ($number < $min) {
+            return $min;
+        }
+
+        if ($number > $max) {
+            return $max;
+        }
+
+        return $number;
     }
 
     /**
@@ -943,6 +1031,16 @@ final class SettingsPage
             return;
         }
 
+        if ($module->id() === self::REGISTRATION_RATE_LIMIT_MODULE_ID) {
+            $this->renderRegistrationRateLimitFields($moduleSettings);
+            return;
+        }
+
+        if ($module->id() === self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID) {
+            $this->renderRegistrationEmailVerificationFields($moduleSettings);
+            return;
+        }
+
         if ($module->id() === self::SMTP_MODULE_ID) {
             $this->renderSmtpFields($moduleSettings);
             return;
@@ -1037,13 +1135,88 @@ final class SettingsPage
                 <?php else : ?>
                     <p class="purepress-module__description">GeoIP 数据库不存在，无法解析 IP 归属地。登录审计仍会记录最后登录时间和 IP。</p>
                 <?php endif; ?>
-                <p class="purepress-module__description">GeoLite2 数据由 MaxMind 提供。</p>
                 <p>
                     <button class="button button-secondary" type="submit" form="purepress-geoip-update-form">更新 GeoIP 数据库</button>
                 </p>
             <?php else : ?>
                 <p class="purepress-module__description">启用并保存后，可以更新 GeoIP 数据库并解析最后登录位置。</p>
             <?php endif; ?>
+        </div>
+        <?php
+    }
+
+    /**
+     * 渲染注册频率限制配置字段。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function renderRegistrationRateLimitFields(array $moduleSettings): void
+    {
+        $fieldPrefix = 'module_settings[' . self::REGISTRATION_RATE_LIMIT_MODULE_ID . ']';
+        ?>
+        <div class="purepress-module__fields">
+            <label for="purepress-registration-email-limit">单邮箱次数</label>
+            <input
+                id="purepress-registration-email-limit"
+                type="number"
+                min="1"
+                max="1000"
+                name="<?php echo esc_attr($fieldPrefix); ?>[email_limit]"
+                value="<?php echo esc_attr((string) ($moduleSettings['email_limit'] ?? 8)); ?>"
+            >
+
+            <label for="purepress-registration-email-window">单邮箱时间窗口（分钟）</label>
+            <input
+                id="purepress-registration-email-window"
+                type="number"
+                min="1"
+                max="1440"
+                name="<?php echo esc_attr($fieldPrefix); ?>[email_window_minutes]"
+                value="<?php echo esc_attr((string) ($moduleSettings['email_window_minutes'] ?? 30)); ?>"
+            >
+
+            <label for="purepress-registration-ip-limit">单 IP 次数</label>
+            <input
+                id="purepress-registration-ip-limit"
+                type="number"
+                min="1"
+                max="10000"
+                name="<?php echo esc_attr($fieldPrefix); ?>[ip_limit]"
+                value="<?php echo esc_attr((string) ($moduleSettings['ip_limit'] ?? 20)); ?>"
+            >
+
+            <label for="purepress-registration-ip-window">单 IP 时间窗口（分钟）</label>
+            <input
+                id="purepress-registration-ip-window"
+                type="number"
+                min="1"
+                max="1440"
+                name="<?php echo esc_attr($fieldPrefix); ?>[ip_window_minutes]"
+                value="<?php echo esc_attr((string) ($moduleSettings['ip_window_minutes'] ?? 60)); ?>"
+            >
+        </div>
+        <?php
+    }
+
+    /**
+     * 渲染注册邮箱验证配置字段。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function renderRegistrationEmailVerificationFields(array $moduleSettings): void
+    {
+        $fieldPrefix = 'module_settings[' . self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID . ']';
+        ?>
+        <div class="purepress-module__fields">
+            <label for="purepress-registration-verification-expiration">验证有效期（分钟）</label>
+            <input
+                id="purepress-registration-verification-expiration"
+                type="number"
+                min="5"
+                max="1440"
+                name="<?php echo esc_attr($fieldPrefix); ?>[expiration_minutes]"
+                value="<?php echo esc_attr((string) ($moduleSettings['expiration_minutes'] ?? 60)); ?>"
+            >
         </div>
         <?php
     }
