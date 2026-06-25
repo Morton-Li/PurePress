@@ -29,6 +29,14 @@ final class OptionKeys
     }
 
     /**
+     * 获取 GeoIP 数据库最后更新时间键名。
+     */
+    public static function geoIpDatabaseUpdatedAt(): string
+    {
+        return self::PREFIX . 'geoip_database_updated_at';
+    }
+
+    /**
      * 获取模块配置键名。
      *
      * @param string $moduleId 模块 ID，例如 `governance.rest_api`。
@@ -47,6 +55,7 @@ final class OptionKeys
     {
         $keys = [
             self::version(),
+            self::geoIpDatabaseUpdatedAt(),
         ];
 
         foreach (ModuleCatalog::definitions() as $definition) {
