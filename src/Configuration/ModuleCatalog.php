@@ -16,6 +16,7 @@ namespace PurePress\Configuration;
 use PurePress\Enhancement\MediaFoldersModule;
 use PurePress\Enhancement\SmtpModule;
 use PurePress\Governance\LoginAddressModule;
+use PurePress\Governance\LoginAuditModule;
 use PurePress\Governance\RestApiModule;
 use PurePress\Governance\WordPressFingerprintModule;
 use PurePress\Governance\XmlRpcModule;
@@ -80,6 +81,14 @@ NGINX
                 'Governance',
                 '管理 WordPress 默认登录与注册地址。',
                 LoginAddressModule::class
+            ),
+            new ModuleDefinition(
+                'governance.login_audit',
+                '登录审计',
+                'Governance',
+                '记录用户最后一次成功登录的时间、IP 与归属地。',
+                LoginAuditModule::class,
+                'GeoIP 数据库默认不随插件打包。启用后可在本模块中手动更新数据库，数据文件保存于 wp-content/purepress/data/geoip/GeoLite2-City.mmdb。GeoLite2 数据由 MaxMind 提供。'
             ),
             new ModuleDefinition(
                 'enhancement.smtp',
