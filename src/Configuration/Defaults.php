@@ -46,6 +46,10 @@ final class Defaults
             'ip_limit' => 20,
             'ip_window_minutes' => 60,
         ],
+        'governance.registration_email_verification' => [
+            'enabled' => false,
+            'expiration_minutes' => 60,
+        ],
         'enhancement.smtp' => [
             'enabled' => false,
             'host' => '',

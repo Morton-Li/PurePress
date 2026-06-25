@@ -17,6 +17,7 @@ use PurePress\Enhancement\MediaFoldersModule;
 use PurePress\Enhancement\SmtpModule;
 use PurePress\Governance\LoginAddressModule;
 use PurePress\Governance\LoginAuditModule;
+use PurePress\Governance\RegistrationEmailVerificationModule;
 use PurePress\Governance\RegistrationRateLimitModule;
 use PurePress\Governance\RestApiModule;
 use PurePress\Governance\WordPressFingerprintModule;
@@ -97,6 +98,14 @@ NGINX
                 'Governance',
                 '限制注册请求触发邮件的频率。',
                 RegistrationRateLimitModule::class
+            ),
+            new ModuleDefinition(
+                'governance.registration_email_verification',
+                '注册邮箱验证',
+                'Governance',
+                '先验证注册邮箱，再创建 WordPress 用户。',
+                RegistrationEmailVerificationModule::class,
+                'WordPress 原生注册会先创建用户并发送设置密码链接。PurePress 改为先写入待验证记录，邮箱验证后再创建用户，减少注册机占用用户表与邮箱。'
             ),
             new ModuleDefinition(
                 'enhancement.smtp',

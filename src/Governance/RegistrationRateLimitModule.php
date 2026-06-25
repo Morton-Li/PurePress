@@ -115,6 +115,10 @@ final class RegistrationRateLimitModule implements ModuleInterface
      */
     private function applyFrequencyLimit(WP_Error $errors, string $userEmail, string $errorCode): WP_Error
     {
+        if ((bool) apply_filters('purepress_skip_registration_rate_limit', false)) {
+            return $errors;
+        }
+
         if ($errors->has_errors()) {
             return $errors;
         }

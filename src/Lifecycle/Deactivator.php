@@ -15,6 +15,7 @@ namespace PurePress\Lifecycle;
 
 use PurePress\Configuration\OptionRepository;
 use PurePress\Governance\LoginAddressModule;
+use PurePress\Governance\RegistrationEmailVerificationStore;
 
 final class Deactivator
 {
@@ -28,6 +29,7 @@ final class Deactivator
         LoginAddressModule::removeRewriteRulesForSettings(
             $options->moduleSettings(LoginAddressModule::MODULE_ID)
         );
+        RegistrationEmailVerificationStore::unscheduleCleanup();
 
         if (function_exists('flush_rewrite_rules')) {
             flush_rewrite_rules(false);
