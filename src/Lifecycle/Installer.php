@@ -16,6 +16,7 @@ namespace PurePress\Lifecycle;
 use PurePress\Configuration\OptionRepository;
 use PurePress\Configuration\OptionSynchronizer;
 use PurePress\Governance\LoginAddressModule;
+use PurePress\Governance\RegistrationRateLimitStore;
 
 final class Installer
 {
@@ -27,6 +28,7 @@ final class Installer
         $options = new OptionRepository();
 
         (new OptionSynchronizer($options))->sync();
+        RegistrationRateLimitStore::install();
         LoginAddressModule::addRewriteRulesForSettings(
             $options->moduleSettings(LoginAddressModule::MODULE_ID)
         );

@@ -15,6 +15,7 @@ namespace PurePress\Lifecycle;
 
 use PurePress\Configuration\OptionKeys;
 use PurePress\Governance\GeoIpDatabase;
+use PurePress\Governance\RegistrationRateLimitStore;
 
 final class Uninstaller
 {
@@ -26,6 +27,7 @@ final class Uninstaller
         global $wpdb;
 
         GeoIpDatabase::deleteDataRoot();
+        RegistrationRateLimitStore::uninstall();
 
         if (
             ! isset($wpdb)

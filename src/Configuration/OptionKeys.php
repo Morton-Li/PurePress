@@ -37,6 +37,14 @@ final class OptionKeys
     }
 
     /**
+     * 获取注册频率限制表结构版本键名。
+     */
+    public static function registrationRateLimitSchemaVersion(): string
+    {
+        return self::PREFIX . 'registration_rate_limit_schema_version';
+    }
+
+    /**
      * 获取模块配置键名。
      *
      * @param string $moduleId 模块 ID，例如 `governance.rest_api`。
@@ -56,6 +64,7 @@ final class OptionKeys
         $keys = [
             self::version(),
             self::geoIpDatabaseUpdatedAt(),
+            self::registrationRateLimitSchemaVersion(),
         ];
 
         foreach (ModuleCatalog::definitions() as $definition) {
