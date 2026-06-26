@@ -50,6 +50,23 @@ final class Defaults
             'enabled' => false,
             'expiration_minutes' => 60,
         ],
+        'optimization.page_cache' => [
+            'enabled' => false,
+            'ttl_minutes' => 30,
+            'scheduled_cleanup' => true,
+            'console_log' => true,
+            'excluded_paths' => [
+                '/wp-admin',
+                '/wp-login.php',
+                '/wp-signup.php',
+                '/wp-cron.php',
+                '/xmlrpc.php',
+                '/wp-json',
+                '/feed',
+                '/comments/feed',
+                '/console',
+            ],
+        ],
         'enhancement.smtp' => [
             'enabled' => false,
             'host' => '',

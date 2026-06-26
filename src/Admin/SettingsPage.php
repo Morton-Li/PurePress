@@ -21,6 +21,7 @@ use PurePress\Governance\LoginAddressModule;
 use PurePress\Governance\LoginAuditModule;
 use PurePress\Governance\RegistrationEmailVerificationModule;
 use PurePress\Governance\RegistrationRateLimitModule;
+use PurePress\Optimization\PageCacheModule;
 use PurePress\Support\HookRegistry;
 
 final class SettingsPage
@@ -30,6 +31,7 @@ final class SettingsPage
     private const string LOGIN_AUDIT_MODULE_ID = LoginAuditModule::MODULE_ID;
     private const string REGISTRATION_EMAIL_VERIFICATION_MODULE_ID = RegistrationEmailVerificationModule::MODULE_ID;
     private const string REGISTRATION_RATE_LIMIT_MODULE_ID = RegistrationRateLimitModule::MODULE_ID;
+    private const string PAGE_CACHE_MODULE_ID = PageCacheModule::MODULE_ID;
     private const string SMTP_MODULE_ID = 'enhancement.smtp';
     private const string S3_MEDIA_MODULE_ID = 'integration.s3_media';
 
@@ -76,6 +78,7 @@ final class SettingsPage
         $hooks->action('admin_post_purepress_save_settings', [$this, 'save']);
         $hooks->action('admin_post_purepress_send_test_email', [$this, 'sendTestEmail']);
         $hooks->action('admin_post_purepress_update_geoip_database', [$this, 'updateGeoIpDatabase']);
+        $hooks->action('admin_post_purepress_clear_page_cache', [$this, 'clearPageCache']);
     }
 
     /**
@@ -190,6 +193,32 @@ final class SettingsPage
                     'page' => self::PAGE_SLUG,
                     'purepress_tab' => 'Governance',
                     'purepress_geoip' => $result,
+                ],
+                admin_url('options-general.php')
+            )
+        );
+        exit;
+    }
+
+    /**
+     * 清空页面缓存。
+     */
+    public function clearPageCache(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('你没有权限清空 PurePress 页面缓存。');
+        }
+
+        check_admin_referer('purepress_clear_page_cache');
+
+        PageCacheModule::clear();
+
+        wp_safe_redirect(
+            add_query_arg(
+                [
+                    'page' => self::PAGE_SLUG,
+                    'purepress_tab' => 'Optimization',
+                    'purepress_page_cache' => 'cleared',
                 ],
                 admin_url('options-general.php')
             )
@@ -314,6 +343,7 @@ final class SettingsPage
 
             <?php $this->renderTestMailNotice(); ?>
             <?php $this->renderGeoIpNotice(); ?>
+            <?php $this->renderPageCacheNotice(); ?>
 
             <p>PurePress 的所有能力都通过模块独立启用。默认情况下，功能模块保持关闭，由你按站点需要逐步打开。</p>
 
@@ -389,6 +419,13 @@ final class SettingsPage
                 <form id="purepress-geoip-update-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
                     <?php wp_nonce_field('purepress_update_geoip_database'); ?>
                     <input type="hidden" name="action" value="purepress_update_geoip_database">
+                </form>
+            <?php endif; ?>
+
+            <?php if ($activeGroup === 'Optimization' && $this->hasModule($modules, self::PAGE_CACHE_MODULE_ID)) : ?>
+                <form id="purepress-page-cache-clear-form" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                    <?php wp_nonce_field('purepress_clear_page_cache'); ?>
+                    <input type="hidden" name="action" value="purepress_clear_page_cache">
                 </form>
             <?php endif; ?>
         </div>
@@ -477,6 +514,15 @@ final class SettingsPage
                 self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID,
                 $this->submittedRegistrationEmailVerificationSettings()
             );
+        }
+
+        if (in_array(self::PAGE_CACHE_MODULE_ID, $allowedModuleIds, true)) {
+            $this->options->saveModuleSettings(
+                self::PAGE_CACHE_MODULE_ID,
+                $this->submittedPageCacheSettings()
+            );
+            PageCacheModule::clear();
+            PageCacheModule::syncCleanupSchedule();
         }
     }
 
@@ -656,6 +702,31 @@ final class SettingsPage
     }
 
     /**
+     * 读取并清洗页面缓存配置。
+     *
+     * @return array{ttl_minutes: int, scheduled_cleanup: bool, console_log: bool, excluded_paths: list<string>}
+     */
+    private function submittedPageCacheSettings(): array
+    {
+        $rawSettings = $_POST['module_settings'][self::PAGE_CACHE_MODULE_ID] ?? [];
+
+        if (! is_array($rawSettings)) {
+            $rawSettings = [];
+        }
+
+        if (function_exists('wp_unslash')) {
+            $rawSettings = wp_unslash($rawSettings);
+        }
+
+        return [
+            'ttl_minutes' => $this->sanitizePositiveInteger($rawSettings['ttl_minutes'] ?? 30, 30, 1, 1440),
+            'scheduled_cleanup' => isset($rawSettings['scheduled_cleanup']),
+            'console_log' => isset($rawSettings['console_log']),
+            'excluded_paths' => $this->sanitizeExcludedPaths($rawSettings['excluded_paths'] ?? ''),
+        ];
+    }
+
+    /**
      * 读取并清洗测试邮件收件人。
      */
     private function submittedTestEmail(): string
@@ -779,6 +850,63 @@ final class SettingsPage
         $path = trim((string) $path, '/');
 
         return str_replace(["\0", '..'], '', $path);
+    }
+
+    /**
+     * 清洗页面缓存排除路径。
+     *
+     * 每行一个站内路径，支持用 `*` 作为末尾通配符。
+     *
+     * @param mixed $value 原始排除路径配置。
+     *
+     * @return list<string>
+     */
+    private function sanitizeExcludedPaths(mixed $value): array
+    {
+        if (is_array($value)) {
+            $lines = array_map('strval', $value);
+        } else {
+            $lines = preg_split('/\R/', is_scalar($value) ? (string) $value : '');
+        }
+
+        if (! is_array($lines)) {
+            return [];
+        }
+
+        $paths = [];
+
+        foreach ($lines as $line) {
+            $path = trim((string) $line);
+
+            if ($path === '' || str_contains($path, "\0") || str_contains($path, '..')) {
+                continue;
+            }
+
+            $wildcard = str_ends_with($path, '*');
+            $path = $wildcard ? substr($path, 0, -1) : $path;
+            $parsed = wp_parse_url($path);
+
+            if (
+                false === $parsed
+                || isset($parsed['scheme'])
+                || isset($parsed['host'])
+                || isset($parsed['query'])
+                || isset($parsed['fragment'])
+            ) {
+                continue;
+            }
+
+            $path = isset($parsed['path']) && is_string($parsed['path']) ? $parsed['path'] : '';
+            $path = '/' . trim((string) preg_replace('#/+#', '/', str_replace('\\', '/', $path)), '/');
+
+            if ($path === '/') {
+                continue;
+            }
+
+            $paths[] = $wildcard ? rtrim($path, '/') . '*' : rtrim($path, '/');
+        }
+
+        return array_values(array_unique($paths));
     }
 
     /**
@@ -1041,6 +1169,11 @@ final class SettingsPage
             return;
         }
 
+        if ($module->id() === self::PAGE_CACHE_MODULE_ID) {
+            $this->renderPageCacheFields($moduleSettings);
+            return;
+        }
+
         if ($module->id() === self::SMTP_MODULE_ID) {
             $this->renderSmtpFields($moduleSettings);
             return;
@@ -1217,6 +1350,75 @@ final class SettingsPage
                 name="<?php echo esc_attr($fieldPrefix); ?>[expiration_minutes]"
                 value="<?php echo esc_attr((string) ($moduleSettings['expiration_minutes'] ?? 60)); ?>"
             >
+        </div>
+        <?php
+    }
+
+    /**
+     * 渲染页面缓存配置字段。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function renderPageCacheFields(array $moduleSettings): void
+    {
+        $fieldPrefix = 'module_settings[' . self::PAGE_CACHE_MODULE_ID . ']';
+        $excludedPaths = $moduleSettings['excluded_paths'] ?? [];
+        $excludedPathsText = is_array($excludedPaths)
+            ? implode("\n", array_filter(array_map('strval', $excludedPaths)))
+            : (string) $excludedPaths;
+        $status = PageCacheModule::status();
+        ?>
+        <div class="purepress-module__fields">
+            <label for="purepress-page-cache-ttl">缓存有效期（分钟）</label>
+            <input
+                id="purepress-page-cache-ttl"
+                type="number"
+                min="1"
+                max="1440"
+                name="<?php echo esc_attr($fieldPrefix); ?>[ttl_minutes]"
+                value="<?php echo esc_attr((string) ($moduleSettings['ttl_minutes'] ?? 30)); ?>"
+            >
+
+            <label for="purepress-page-cache-console-log">命中提示</label>
+            <label>
+                <input
+                    id="purepress-page-cache-console-log"
+                    type="checkbox"
+                    name="<?php echo esc_attr($fieldPrefix); ?>[console_log]"
+                    value="1"
+                    <?php checked((bool) ($moduleSettings['console_log'] ?? true)); ?>
+                >
+                命中缓存时在浏览器控制台输出提示
+            </label>
+
+            <label for="purepress-page-cache-scheduled-cleanup">定时清理</label>
+            <label>
+                <input
+                    id="purepress-page-cache-scheduled-cleanup"
+                    type="checkbox"
+                    name="<?php echo esc_attr($fieldPrefix); ?>[scheduled_cleanup]"
+                    value="1"
+                    <?php checked((bool) ($moduleSettings['scheduled_cleanup'] ?? true)); ?>
+                >
+                定时清理过期缓存
+            </label>
+
+            <label for="purepress-page-cache-excluded-paths">排除路径</label>
+            <textarea
+                id="purepress-page-cache-excluded-paths"
+                name="<?php echo esc_attr($fieldPrefix); ?>[excluded_paths]"
+                rows="8"
+                spellcheck="false"
+            ><?php echo esc_textarea($excludedPathsText); ?></textarea>
+        </div>
+
+        <div class="purepress-module__actions">
+            <p class="purepress-module__description">
+                当前缓存文件：<?php echo esc_html((string) $status['files']); ?> 个，占用：<?php echo esc_html($this->formattedFileSize($status['size'])); ?>。
+            </p>
+            <p>
+                <button class="button button-secondary" type="submit" form="purepress-page-cache-clear-form">清空页面缓存</button>
+            </p>
         </div>
         <?php
     }
@@ -1412,6 +1614,24 @@ final class SettingsPage
         ?>
         <div class="notice <?php echo esc_attr($className); ?> is-dismissible">
             <p><?php echo esc_html($message); ?></p>
+        </div>
+        <?php
+    }
+
+    /**
+     * 渲染页面缓存操作结果提示。
+     */
+    private function renderPageCacheNotice(): void
+    {
+        $result = $_GET['purepress_page_cache'] ?? '';
+
+        if (! is_scalar($result) || $result !== 'cleared') {
+            return;
+        }
+
+        ?>
+        <div class="notice notice-success is-dismissible">
+            <p>页面缓存已清空。</p>
         </div>
         <?php
     }
