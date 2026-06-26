@@ -17,6 +17,7 @@ use PurePress\Configuration\OptionKeys;
 use PurePress\Governance\GeoIpDatabase;
 use PurePress\Governance\RegistrationEmailVerificationStore;
 use PurePress\Governance\RegistrationRateLimitStore;
+use PurePress\Optimization\PageCacheModule;
 
 final class Uninstaller
 {
@@ -28,6 +29,8 @@ final class Uninstaller
         global $wpdb;
 
         GeoIpDatabase::deleteDataRoot();
+        PageCacheModule::unscheduleCleanup();
+        PageCacheModule::clear();
         RegistrationEmailVerificationStore::uninstall();
         RegistrationRateLimitStore::uninstall();
 

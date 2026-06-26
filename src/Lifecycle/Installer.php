@@ -18,6 +18,7 @@ use PurePress\Configuration\OptionSynchronizer;
 use PurePress\Governance\LoginAddressModule;
 use PurePress\Governance\RegistrationEmailVerificationStore;
 use PurePress\Governance\RegistrationRateLimitStore;
+use PurePress\Optimization\PageCacheModule;
 
 final class Installer
 {
@@ -32,6 +33,7 @@ final class Installer
         RegistrationEmailVerificationStore::install();
         RegistrationEmailVerificationStore::scheduleCleanup();
         RegistrationRateLimitStore::install();
+        PageCacheModule::syncCleanupSchedule();
         LoginAddressModule::addRewriteRulesForSettings(
             $options->moduleSettings(LoginAddressModule::MODULE_ID)
         );
