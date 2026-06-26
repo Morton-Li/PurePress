@@ -514,9 +514,48 @@ final class RegistrationEmailVerificationModule implements ModuleInterface
             return true;
         }
 
-        return function_exists('is_admin')
-            && is_admin()
-            && (! function_exists('wp_doing_ajax') || ! wp_doing_ajax());
+        if (! function_exists('is_admin') || ! is_admin()) {
+            return false;
+        }
+
+        if (function_exists('wp_doing_ajax') && wp_doing_ajax()) {
+            return false;
+        }
+
+        return ! $this->isUnauthenticatedAdminPostRequest();
+    }
+
+    /**
+     * 判断当前请求是否为未登录用户通过 admin-post.php 提交的前台表单。
+     *
+     * `admin-post.php` 属于 WordPress 管理入口，`is_admin()` 会返回 true；
+     * 但它也常被主题用于承载前台注册表单，不能按后台管理页面处理。
+     */
+    private function isUnauthenticatedAdminPostRequest(): bool
+    {
+        if (function_exists('is_user_logged_in') && is_user_logged_in()) {
+            return false;
+        }
+
+        global $pagenow;
+
+        if (isset($pagenow) && $pagenow === 'admin-post.php') {
+            return true;
+        }
+
+        foreach (['SCRIPT_NAME', 'PHP_SELF'] as $serverKey) {
+            $script = $_SERVER[$serverKey] ?? '';
+
+            if (! is_string($script)) {
+                continue;
+            }
+
+            if ($script === 'admin-post.php' || str_ends_with($script, '/admin-post.php')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
