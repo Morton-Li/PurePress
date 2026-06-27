@@ -114,7 +114,7 @@ NGINX
                 'Optimization',
                 '为匿名访客缓存前台 HTML 页面。',
                 PageCacheModule::class,
-                '默认使用 PHP 输出缓存，不修改 wp-config.php，也不写入服务器重写规则。需要 Nginx 绕过 PHP 时，可合并下方示例；未配置 Nginx 时，PHP 缓存仍然有效。使用 Nginx 绕过 PHP 时建议保持定时清理开启。',
+                '默认使用 PHP 输出缓存，不修改 wp-config.php，也不写入服务器重写规则。下方为最小 Nginx 读取示例；未配置 Nginx 时，PHP 缓存仍然有效。',
                 <<<'NGINX'
 set $page_cache_file /__page_cache_disabled__;
 
@@ -131,14 +131,6 @@ if ($http_cache_control ~* "no-cache|no-store") {
 }
 
 if ($http_pragma ~* "no-cache") {
-    set $page_cache_file /__page_cache_disabled__;
-}
-
-if ($http_cookie ~* "(wordpress_logged_in_|wordpress_sec_|wp-postpass_|comment_author_|woocommerce_|wp_woocommerce_session_|woocommerce_cart_hash|woocommerce_items_in_cart)") {
-    set $page_cache_file /__page_cache_disabled__;
-}
-
-if ($request_uri ~* "^/(wp-admin|wp-login\.php|wp-signup\.php|wp-cron\.php|xmlrpc\.php|wp-json|feed|comments/feed|console)(/|$)") {
     set $page_cache_file /__page_cache_disabled__;
 }
 
