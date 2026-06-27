@@ -1,0 +1,58 @@
+.purepress-comment-required {
+    margin: 1.25rem 0;
+}
+
+.purepress-comment-required__body {
+    min-height: 64px;
+}
+
+.purepress-comment-required__placeholder,
+.purepress-comment-required__loading {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    box-sizing: border-box;
+    min-height: 64px;
+    padding: 16px;
+    border: 1px solid #dcdcde;
+    border-left: 4px solid #72aee6;
+    background: #f6f7f7;
+    color: #1d2327;
+    font-size: 15px;
+    line-height: 1.6;
+}
+
+.purepress-comment-required__icon {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+    opacity: .72;
+}
+
+.purepress-comment-required__icon::after {
+    display: block;
+    width: 6px;
+    height: 6px;
+    margin: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    content: "";
+}
+
+.purepress-comment-required__content > :first-child {
+    margin-top: 0;
+}
+
+.purepress-comment-required__content > :last-child {
+    margin-bottom: 0;
+}
+
+.purepress-comment-required.is-loading .purepress-comment-required__body {
+    opacity: .74;
+}
+
+.purepress-comment-required.is-unlocked .purepress-comment-required__body {
+    min-height: 0;
+}
