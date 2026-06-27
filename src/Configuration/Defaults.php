@@ -66,6 +66,12 @@ final class Defaults
                 '/comments/feed',
             ],
         ],
+        'enhancement.guest_comments' => [
+            'enabled' => false,
+            'ip_limit' => 5,
+            'email_limit' => 5,
+            'window_minutes' => 10,
+        ],
         'enhancement.smtp' => [
             'enabled' => false,
             'host' => '',
