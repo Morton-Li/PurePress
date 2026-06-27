@@ -13,6 +13,7 @@ declare(strict_types=1);
 
 namespace PurePress\Configuration;
 
+use PurePress\Enhancement\GuestCommentsModule;
 use PurePress\Enhancement\MediaFoldersModule;
 use PurePress\Enhancement\SmtpModule;
 use PurePress\Governance\LoginAddressModule;
@@ -134,10 +135,22 @@ if ($http_pragma ~* "no-cache") {
     set $page_cache_file /__page_cache_disabled__;
 }
 
+if ($http_cookie ~* "(wordpress_logged_in_|wordpress_sec_|wp-postpass_|comment_author_)") {
+    set $page_cache_file /__page_cache_disabled__;
+}
+
 location / {
     try_files $page_cache_file $uri $uri/ /index.php?$args;
 }
 NGINX
+            ),
+            new ModuleDefinition(
+                'enhancement.guest_comments',
+                '免登录文章回复',
+                'Enhancement',
+                '允许未登录访客提交文章评论。',
+                GuestCommentsModule::class,
+                '启用后，访客无需登录即可使用文章评论表单；评论仍遵循 WordPress 原生评论开关、审核、姓名邮箱必填、评论 Cookie 与重复评论检查。'
             ),
             new ModuleDefinition(
                 'enhancement.smtp',
