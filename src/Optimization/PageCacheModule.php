@@ -289,6 +289,35 @@ final class PageCacheModule implements ModuleInterface
     }
 
     /**
+     * 删除指定 URL 对应的页面缓存文件。
+     *
+     * @param string $url 页面 URL。
+     */
+    public static function clearUrl(string $url): void
+    {
+        $cacheFile = self::cacheFilePathForUrl($url);
+
+        if ($cacheFile === '' || ! is_file($cacheFile)) {
+            return;
+        }
+
+        @unlink($cacheFile);
+        self::removeEmptyParentDirectories(dirname($cacheFile), self::cacheRootPath());
+    }
+
+    /**
+     * 判断指定 URL 是否已经生成页面缓存文件。
+     *
+     * @param string $url 页面 URL。
+     */
+    public static function hasCachedUrl(string $url): bool
+    {
+        $cacheFile = self::cacheFilePathForUrl($url);
+
+        return $cacheFile !== '' && is_readable($cacheFile);
+    }
+
+    /**
      * 判断当前请求是否允许读取或写入页面缓存。
      */
     private function isCacheableRequest(): bool
@@ -386,13 +415,49 @@ final class PageCacheModule implements ModuleInterface
             return '';
         }
 
-        $relativePath = $this->cacheRelativePath($path);
+        $relativePath = self::cacheRelativePath($path);
 
         if ($relativePath === '') {
             return '';
         }
 
-        return $cacheRoot . '/' . $scheme . '/' . $this->safeHost($host) . '/' . $relativePath . '/index.html';
+        return $cacheRoot . '/' . $scheme . '/' . self::safeHost($host) . '/' . $relativePath . '/index.html';
+    }
+
+    /**
+     * 将 URL 转换为对应的缓存文件路径。
+     *
+     * @param string $url 页面 URL。
+     */
+    private static function cacheFilePathForUrl(string $url): string
+    {
+        $cacheRoot = self::cacheRootPath();
+
+        if ($cacheRoot === '') {
+            return '';
+        }
+
+        $parts = function_exists('wp_parse_url') ? wp_parse_url($url) : parse_url($url);
+
+        if (! is_array($parts)) {
+            return '';
+        }
+
+        $scheme = strtolower((string) ($parts['scheme'] ?? ''));
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $path = (string) ($parts['path'] ?? '/');
+
+        if ($scheme === '' || $host === '') {
+            return '';
+        }
+
+        $relativePath = self::cacheRelativePath($path);
+
+        if ($relativePath === '') {
+            return '';
+        }
+
+        return $cacheRoot . '/' . $scheme . '/' . self::safeHost($host) . '/' . $relativePath . '/index.html';
     }
 
     /**
@@ -694,7 +759,7 @@ final class PageCacheModule implements ModuleInterface
      *
      * @param string $host 原始主机名。
      */
-    private function safeHost(string $host): string
+    private static function safeHost(string $host): string
     {
         $host = strtolower(trim($host));
         $host = preg_replace('/[^a-z0-9.-]+/', '-', $host);
@@ -707,7 +772,7 @@ final class PageCacheModule implements ModuleInterface
      *
      * @param string $path 请求路径。
      */
-    private function cacheRelativePath(string $path): string
+    private static function cacheRelativePath(string $path): string
     {
         $path = trim($path);
 
@@ -864,6 +929,34 @@ final class PageCacheModule implements ModuleInterface
 
         if (is_array($items) && count(array_diff($items, ['.', '..'])) === 0) {
             @rmdir($path);
+        }
+    }
+
+    /**
+     * 从指定目录开始向上删除空目录，直到缓存根目录为止。
+     *
+     * @param string $path     起始目录。
+     * @param string $stopPath 缓存根目录。
+     */
+    private static function removeEmptyParentDirectories(string $path, string $stopPath): void
+    {
+        if ($path === '' || $stopPath === '') {
+            return;
+        }
+
+        $path = rtrim($path, '/\\');
+        $stopPath = rtrim($stopPath, '/\\');
+
+        while ($path !== '' && $path !== $stopPath && str_starts_with($path, $stopPath)) {
+            self::removeDirectoryIfEmpty($path);
+
+            $parent = dirname($path);
+
+            if ($parent === $path) {
+                break;
+            }
+
+            $path = $parent;
         }
     }
 
