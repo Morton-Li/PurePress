@@ -20,6 +20,7 @@ use PurePress\Governance\GeoIpDatabase;
 use PurePress\Governance\LoginAddressModule;
 use PurePress\Governance\LoginAuditModule;
 use PurePress\Governance\RegistrationEmailVerificationModule;
+use PurePress\Governance\RegistrationEmailVerificationStore;
 use PurePress\Governance\RegistrationRateLimitModule;
 use PurePress\Optimization\PageCacheModule;
 use PurePress\Support\HookRegistry;
@@ -79,6 +80,7 @@ final class SettingsPage
         $hooks->action('admin_post_purepress_send_test_email', [$this, 'sendTestEmail']);
         $hooks->action('admin_post_purepress_update_geoip_database', [$this, 'updateGeoIpDatabase']);
         $hooks->action('admin_post_purepress_clear_page_cache', [$this, 'clearPageCache']);
+        $hooks->action('admin_post_purepress_expire_pending_registration', [$this, 'expirePendingRegistration']);
     }
 
     /**
@@ -227,6 +229,38 @@ final class SettingsPage
     }
 
     /**
+     * 手动使待验证注册记录失效。
+     */
+    public function expirePendingRegistration(): void
+    {
+        if (! current_user_can('manage_options')) {
+            wp_die('你没有权限管理 PurePress 待验证注册。');
+        }
+
+        $pendingId = $this->submittedPendingRegistrationId();
+
+        if ($pendingId <= 0) {
+            wp_die('待验证注册记录无效。');
+        }
+
+        check_admin_referer('purepress_expire_pending_registration_' . $pendingId);
+
+        (new RegistrationEmailVerificationStore())->deleteById($pendingId);
+
+        wp_safe_redirect(
+            add_query_arg(
+                [
+                    'page' => self::PAGE_SLUG,
+                    'purepress_tab' => 'Governance',
+                    'purepress_pending_registration' => 'expired',
+                ],
+                admin_url('options-general.php')
+            )
+        );
+        exit;
+    }
+
+    /**
      * 渲染设置页。
      */
     public function render(): void
@@ -313,6 +347,12 @@ final class SettingsPage
                     border-top: 1px solid #dcdcde;
                 }
 
+                .purepress-module__fullwidth {
+                    margin-top: 14px;
+                    padding-top: 12px;
+                    border-top: 1px solid #dcdcde;
+                }
+
                 @media (max-width: 782px) {
                     .purepress-module__layout--with-info {
                         display: block;
@@ -344,6 +384,7 @@ final class SettingsPage
             <?php $this->renderTestMailNotice(); ?>
             <?php $this->renderGeoIpNotice(); ?>
             <?php $this->renderPageCacheNotice(); ?>
+            <?php $this->renderPendingRegistrationNotice(); ?>
 
             <p>PurePress 的所有能力都通过模块独立启用。默认情况下，功能模块保持关闭，由你按站点需要逐步打开。</p>
 
@@ -402,6 +443,11 @@ final class SettingsPage
                                 </div>
                             <?php endif; ?>
                         </div>
+                        <?php if ($module->id() === self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID && $enabled) : ?>
+                            <div class="purepress-module__fullwidth">
+                                <?php $this->renderPendingRegistrationsTable(); ?>
+                            </div>
+                        <?php endif; ?>
                     </fieldset>
                 <?php endforeach; ?>
 
@@ -420,6 +466,10 @@ final class SettingsPage
                     <?php wp_nonce_field('purepress_update_geoip_database'); ?>
                     <input type="hidden" name="action" value="purepress_update_geoip_database">
                 </form>
+            <?php endif; ?>
+
+            <?php if ($activeGroup === 'Governance' && $this->hasModule($modules, self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID) && (bool) ($settings['modules'][self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID]['enabled'] ?? false)) : ?>
+                <?php $this->renderPendingRegistrationExpireForms(); ?>
             <?php endif; ?>
 
             <?php if ($activeGroup === 'Optimization' && $this->hasModule($modules, self::PAGE_CACHE_MODULE_ID)) : ?>
@@ -744,6 +794,20 @@ final class SettingsPage
         }
 
         return $this->sanitizeEmailValue($recipient);
+    }
+
+    /**
+     * 读取待验证注册记录 ID。
+     */
+    private function submittedPendingRegistrationId(): int
+    {
+        $pendingId = $_POST['pending_id'] ?? 0;
+
+        if (is_scalar($pendingId)) {
+            $pendingId = function_exists('wp_unslash') ? wp_unslash((string) $pendingId) : (string) $pendingId;
+        }
+
+        return max(0, (int) $pendingId);
     }
 
     /**
@@ -1339,6 +1403,7 @@ final class SettingsPage
     private function renderRegistrationEmailVerificationFields(array $moduleSettings): void
     {
         $fieldPrefix = 'module_settings[' . self::REGISTRATION_EMAIL_VERIFICATION_MODULE_ID . ']';
+        $enabled = (bool) ($moduleSettings['enabled'] ?? false);
         ?>
         <div class="purepress-module__fields">
             <label for="purepress-registration-verification-expiration">验证有效期（分钟）</label>
@@ -1351,7 +1416,116 @@ final class SettingsPage
                 value="<?php echo esc_attr((string) ($moduleSettings['expiration_minutes'] ?? 60)); ?>"
             >
         </div>
+        <?php if (! $enabled) : ?>
+            <div class="purepress-module__actions">
+                <p class="purepress-module__description">启用并保存后，可以查看待验证注册并手动使其失效。</p>
+            </div>
+        <?php endif; ?>
         <?php
+    }
+
+    /**
+     * 渲染待验证注册列表。
+     */
+    private function renderPendingRegistrationsTable(): void
+    {
+        $store = new RegistrationEmailVerificationStore();
+        $store->deleteExpired();
+
+        $pendingRegistrations = $store->listPending();
+        ?>
+        <p class="purepress-module__description">待验证注册：<?php echo esc_html((string) count($pendingRegistrations)); ?> 条。</p>
+        <?php if ([] === $pendingRegistrations) : ?>
+            <p class="purepress-module__description">暂无待验证注册。</p>
+            <?php return; ?>
+        <?php endif; ?>
+
+        <table class="widefat striped purepress-pending-registrations">
+            <thead>
+                <tr>
+                    <th>用户名</th>
+                    <th>邮箱</th>
+                    <th>注册 IP</th>
+                    <th>创建时间</th>
+                    <th>有效时间</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($pendingRegistrations as $pendingRegistration) : ?>
+                    <?php $pendingId = $this->pendingRegistrationId($pendingRegistration); ?>
+                    <tr>
+                        <td><?php echo esc_html($this->pendingRegistrationValue($pendingRegistration, 'user_login')); ?></td>
+                        <td><?php echo esc_html($this->pendingRegistrationValue($pendingRegistration, 'user_email')); ?></td>
+                        <td><?php echo esc_html($this->pendingRegistrationValue($pendingRegistration, 'request_ip') ?: '未知'); ?></td>
+                        <td><?php echo esc_html($this->formattedMysqlDateTime($this->pendingRegistrationValue($pendingRegistration, 'created_at'))); ?></td>
+                        <td><?php echo esc_html($this->formattedPendingExpiration($this->pendingRegistrationValue($pendingRegistration, 'expires_at'))); ?></td>
+                        <td>
+                            <?php if ($pendingId > 0) : ?>
+                                <button
+                                    class="button button-small"
+                                    type="submit"
+                                    form="<?php echo esc_attr('purepress-pending-registration-expire-' . $pendingId); ?>"
+                                    onclick="return confirm('确认使这条待验证注册失效？');"
+                                >
+                                    使其失效
+                                </button>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php
+    }
+
+    /**
+     * 渲染待验证注册失效操作表单。
+     */
+    private function renderPendingRegistrationExpireForms(): void
+    {
+        $store = new RegistrationEmailVerificationStore();
+        $store->deleteExpired();
+
+        foreach ($store->listPending() as $pendingRegistration) {
+            $pendingId = $this->pendingRegistrationId($pendingRegistration);
+
+            if ($pendingId <= 0) {
+                continue;
+            }
+            ?>
+            <form id="<?php echo esc_attr('purepress-pending-registration-expire-' . $pendingId); ?>" method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>">
+                <?php wp_nonce_field('purepress_expire_pending_registration_' . $pendingId); ?>
+                <input type="hidden" name="action" value="purepress_expire_pending_registration">
+                <input type="hidden" name="pending_id" value="<?php echo esc_attr((string) $pendingId); ?>">
+            </form>
+            <?php
+        }
+    }
+
+    /**
+     * 读取待验证注册记录 ID。
+     *
+     * @param array<string,mixed> $pendingRegistration 待验证注册记录。
+     */
+    private function pendingRegistrationId(array $pendingRegistration): int
+    {
+        return isset($pendingRegistration['id']) && is_scalar($pendingRegistration['id'])
+            ? max(0, (int) $pendingRegistration['id'])
+            : 0;
+    }
+
+    /**
+     * 读取待验证注册记录字段。
+     *
+     * @param array<string,mixed> $pendingRegistration 待验证注册记录。
+     * @param string              $key                 字段名。
+     */
+    private function pendingRegistrationValue(array $pendingRegistration, string $key): string
+    {
+        return isset($pendingRegistration[$key]) && is_scalar($pendingRegistration[$key])
+            ? trim((string) $pendingRegistration[$key])
+            : '';
     }
 
     /**
@@ -1637,6 +1811,24 @@ final class SettingsPage
     }
 
     /**
+     * 渲染待验证注册操作结果提示。
+     */
+    private function renderPendingRegistrationNotice(): void
+    {
+        $result = $_GET['purepress_pending_registration'] ?? '';
+
+        if (! is_scalar($result) || $result !== 'expired') {
+            return;
+        }
+
+        ?>
+        <div class="notice notice-success is-dismissible">
+            <p>待验证注册已失效。</p>
+        </div>
+        <?php
+    }
+
+    /**
      * 格式化 GeoIP 数据库更新时间。
      *
      * @param int|null $timestamp 更新时间戳。
@@ -1666,5 +1858,50 @@ final class SettingsPage
         }
 
         return function_exists('size_format') ? size_format($size, 2) : number_format($size) . ' B';
+    }
+
+    /**
+     * 格式化 MySQL UTC 时间为站点本地时间。
+     *
+     * @param string $mysqlTime MySQL UTC 时间。
+     */
+    private function formattedMysqlDateTime(string $mysqlTime): string
+    {
+        $timestamp = $mysqlTime !== '' ? strtotime($mysqlTime . ' UTC') : false;
+
+        if (! is_int($timestamp) || $timestamp <= 0) {
+            return '未知';
+        }
+
+        $format = trim((string) get_option('date_format') . ' ' . (string) get_option('time_format'));
+
+        return function_exists('wp_date')
+            ? wp_date($format, $timestamp)
+            : date_i18n($format, $timestamp);
+    }
+
+    /**
+     * 格式化待验证注册有效期。
+     *
+     * @param string $mysqlTime 过期时间，UTC。
+     */
+    private function formattedPendingExpiration(string $mysqlTime): string
+    {
+        $timestamp = $mysqlTime !== '' ? strtotime($mysqlTime . ' UTC') : false;
+
+        if (! is_int($timestamp) || $timestamp <= 0) {
+            return '未知';
+        }
+
+        if ($timestamp <= time()) {
+            return '已过期';
+        }
+
+        $expiresAt = $this->formattedMysqlDateTime($mysqlTime);
+        $remaining = function_exists('human_time_diff')
+            ? human_time_diff(time(), $timestamp)
+            : max(1, (int) ceil(($timestamp - time()) / 60)) . ' 分钟';
+
+        return $expiresAt . '（约 ' . $remaining . ' 后）';
     }
 }

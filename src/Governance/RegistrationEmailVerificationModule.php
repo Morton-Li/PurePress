@@ -309,6 +309,7 @@ final class RegistrationEmailVerificationModule implements ModuleInterface
     private function renderPasswordSetupPage(array $pending, string $token, WP_Error $errors, bool $frontendRequest): never
     {
         $userLogin = isset($pending['user_login']) && is_scalar($pending['user_login']) ? (string) $pending['user_login'] : '';
+        $userEmail = isset($pending['user_email']) && is_scalar($pending['user_email']) ? (string) $pending['user_email'] : '';
         $actionUrl = $frontendRequest
             ? add_query_arg(self::QUERY_VERIFY, '1', home_url('/'))
             : network_site_url('wp-login.php?action=resetpass', 'login_post');
@@ -317,26 +318,27 @@ final class RegistrationEmailVerificationModule implements ModuleInterface
             login_header('设置密码', '', $errors);
         } else {
             $this->renderPageHeader('设置密码');
+            $this->renderRegistrationPageStyles();
         }
         ?>
-        <form method="post" action="<?php echo esc_url($actionUrl); ?>">
-            <?php wp_nonce_field('purepress_complete_registration'); ?>
-            <input type="hidden" name="purepress_pending_registration" value="1">
-            <input type="hidden" name="login" value="<?php echo esc_attr($userLogin); ?>">
-            <input type="hidden" name="key" value="<?php echo esc_attr($token); ?>">
-
-            <p>
-                <label for="purepress-pass1">新密码</label><br>
-                <input id="purepress-pass1" class="input" type="password" name="pass1" autocomplete="new-password" required>
-            </p>
-            <p>
-                <label for="purepress-pass2">确认新密码</label><br>
-                <input id="purepress-pass2" class="input" type="password" name="pass2" autocomplete="new-password" required>
-            </p>
-            <p class="submit">
-                <button class="button button-primary" type="submit">完成注册</button>
-            </p>
-        </form>
+        <?php if ($frontendRequest) : ?>
+            <main class="purepress-registration-page">
+                <section class="purepress-registration-card" aria-labelledby="purepress-registration-title">
+                    <p class="purepress-registration-kicker">邮箱验证</p>
+                    <h1 id="purepress-registration-title">设置登录密码</h1>
+                    <p class="purepress-registration-summary">
+                        邮箱验证已通过，请为账号 <?php echo esc_html($userLogin); ?> 设置登录密码，完成注册。
+                    </p>
+                    <?php if ($userEmail !== '') : ?>
+                        <p class="purepress-registration-meta">验证邮箱：<?php echo esc_html($userEmail); ?></p>
+                    <?php endif; ?>
+                    <?php $this->renderPasswordSetupErrors($errors); ?>
+                    <?php $this->renderPasswordSetupForm($actionUrl, $userLogin, $token, true); ?>
+                </section>
+            </main>
+        <?php else : ?>
+            <?php $this->renderPasswordSetupForm($actionUrl, $userLogin, $token, false); ?>
+        <?php endif; ?>
         <?php
         if (! $frontendRequest && function_exists('login_footer')) {
             login_footer();
@@ -378,17 +380,193 @@ final class RegistrationEmailVerificationModule implements ModuleInterface
         }
 
         $this->renderPageHeader($messages[$status]['title']);
+        $this->renderRegistrationPageStyles();
         ?>
-        <main class="purepress-registration-status" style="max-width: 720px; margin: 48px auto; padding: 0 20px;">
-            <h1><?php echo esc_html($messages[$status]['title']); ?></h1>
-            <p><?php echo esc_html($messages[$status]['body']); ?></p>
+        <main class="purepress-registration-page">
+            <section class="purepress-registration-card" aria-labelledby="purepress-registration-status-title">
+                <p class="purepress-registration-kicker">注册状态</p>
+                <h1 id="purepress-registration-status-title"><?php echo esc_html($messages[$status]['title']); ?></h1>
+                <p class="purepress-registration-summary"><?php echo esc_html($messages[$status]['body']); ?></p>
             <?php if ($status === 'verified') : ?>
-                <p><a href="<?php echo esc_url($this->verifiedActionUrl()); ?>"><?php echo esc_html($this->verifiedActionLabel()); ?></a></p>
+                <p>
+                    <a class="purepress-registration-button" href="<?php echo esc_url($this->verifiedActionUrl()); ?>"><?php echo esc_html($this->verifiedActionLabel()); ?></a>
+                </p>
             <?php endif; ?>
+            </section>
         </main>
         <?php
         $this->renderPageFooter();
         exit;
+    }
+
+    /**
+     * 渲染设置密码表单。
+     *
+     * @param string $actionUrl       表单提交地址。
+     * @param string $userLogin       用户名。
+     * @param string $token           明文 token。
+     * @param bool   $frontendRequest 是否为 PurePress 前台验证入口。
+     */
+    private function renderPasswordSetupForm(string $actionUrl, string $userLogin, string $token, bool $frontendRequest): void
+    {
+        $inputClass = $frontendRequest ? 'purepress-registration-input' : 'input';
+        $buttonClass = $frontendRequest ? 'purepress-registration-button' : 'button button-primary';
+        ?>
+        <form class="<?php echo esc_attr($frontendRequest ? 'purepress-registration-form' : ''); ?>" method="post" action="<?php echo esc_url($actionUrl); ?>">
+            <?php wp_nonce_field('purepress_complete_registration'); ?>
+            <input type="hidden" name="purepress_pending_registration" value="1">
+            <input type="hidden" name="login" value="<?php echo esc_attr($userLogin); ?>">
+            <input type="hidden" name="key" value="<?php echo esc_attr($token); ?>">
+
+            <p>
+                <label for="purepress-pass1">新密码</label>
+                <input id="purepress-pass1" class="<?php echo esc_attr($inputClass); ?>" type="password" name="pass1" autocomplete="new-password" required>
+            </p>
+            <p>
+                <label for="purepress-pass2">确认新密码</label>
+                <input id="purepress-pass2" class="<?php echo esc_attr($inputClass); ?>" type="password" name="pass2" autocomplete="new-password" required>
+            </p>
+            <p class="submit">
+                <button class="<?php echo esc_attr($buttonClass); ?>" type="submit">完成注册</button>
+            </p>
+        </form>
+        <?php
+    }
+
+    /**
+     * 渲染设置密码错误提示。
+     *
+     * @param WP_Error $errors 表单错误。
+     */
+    private function renderPasswordSetupErrors(WP_Error $errors): void
+    {
+        if (! $errors->has_errors()) {
+            return;
+        }
+        ?>
+        <div class="purepress-registration-errors" role="alert">
+            <?php foreach ($errors->get_error_messages() as $message) : ?>
+                <p><?php echo esc_html($message); ?></p>
+            <?php endforeach; ?>
+        </div>
+        <?php
+    }
+
+    /**
+     * 渲染注册验证前台页面样式。
+     */
+    private function renderRegistrationPageStyles(): void
+    {
+        ?>
+        <style>
+            .purepress-registration-page {
+                width: min(100% - 32px, 760px);
+                margin: 56px auto;
+            }
+
+            .purepress-registration-card {
+                padding: 32px;
+                border: 1px solid rgba(20, 24, 32, 0.12);
+                border-radius: 8px;
+                background: #fff;
+                box-shadow: 0 18px 45px rgba(20, 24, 32, 0.08);
+            }
+
+            .purepress-registration-kicker {
+                margin: 0 0 8px;
+                color: #666;
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            .purepress-registration-card h1 {
+                margin: 0;
+                font-size: 28px;
+                line-height: 1.25;
+            }
+
+            .purepress-registration-summary {
+                margin: 12px 0 0;
+                color: #333;
+                font-size: 16px;
+                line-height: 1.7;
+            }
+
+            .purepress-registration-meta {
+                margin: 8px 0 0;
+                color: #666;
+                font-size: 14px;
+            }
+
+            .purepress-registration-form {
+                margin-top: 24px;
+            }
+
+            .purepress-registration-form p {
+                margin: 0 0 16px;
+            }
+
+            .purepress-registration-form label {
+                display: block;
+                margin-bottom: 6px;
+                font-weight: 700;
+            }
+
+            .purepress-registration-input {
+                width: 100%;
+                min-height: 44px;
+                box-sizing: border-box;
+                border: 1px solid rgba(20, 24, 32, 0.18);
+                border-radius: 6px;
+                padding: 8px 12px;
+                font: inherit;
+            }
+
+            .purepress-registration-button {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 42px;
+                border: 0;
+                border-radius: 6px;
+                padding: 0 18px;
+                background: #1d2327;
+                color: #fff;
+                font-weight: 700;
+                text-decoration: none;
+                cursor: pointer;
+            }
+
+            .purepress-registration-button:hover,
+            .purepress-registration-button:focus {
+                background: #000;
+                color: #fff;
+            }
+
+            .purepress-registration-errors {
+                margin: 18px 0 0;
+                border-left: 4px solid #d63638;
+                padding: 10px 12px;
+                background: #fcf0f1;
+                color: #5c0f12;
+            }
+
+            .purepress-registration-errors p {
+                margin: 0;
+            }
+
+            @media (max-width: 600px) {
+                .purepress-registration-page {
+                    width: min(100% - 24px, 760px);
+                    margin: 32px auto;
+                }
+
+                .purepress-registration-card {
+                    padding: 24px;
+                }
+            }
+        </style>
+        <?php
     }
 
     /**

@@ -206,6 +206,33 @@ final class RegistrationEmailVerificationStore
     }
 
     /**
+     * 查询待验证注册记录列表。
+     *
+     * @param int $limit 最大返回数量。
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function listPending(int $limit = 100): array
+    {
+        global $wpdb;
+
+        if (! isset($wpdb) || ! method_exists($wpdb, 'get_results') || ! method_exists($wpdb, 'prepare')) {
+            return [];
+        }
+
+        $limit = max(1, min(500, $limit));
+        $rows = $wpdb->get_results(
+            $wpdb->prepare(
+                'SELECT id, user_login, user_email, request_ip, created_at, expires_at FROM ' . self::tableName() . ' ORDER BY created_at DESC LIMIT %d',
+                $limit
+            ),
+            ARRAY_A
+        );
+
+        return is_array($rows) ? array_values(array_filter($rows, 'is_array')) : [];
+    }
+
+    /**
      * 删除指定待验证注册记录。
      *
      * @param int $id 待验证记录 ID。
