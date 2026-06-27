@@ -64,7 +64,8 @@ final class GuestCommentsModule implements ModuleInterface
 
         $this->settings = (new OptionRepository())->moduleSettings(self::MODULE_ID);
 
-        $hooks->filter('pre_option_comment_registration', [$this, 'allowGuestCommentRegistration'], 10, 1);
+        $hooks->filter('pre_option_comment_registration', [$this, 'allowGuestCommentRegistration'], 1000, 1);
+        $hooks->filter('option_comment_registration', [$this, 'allowGuestCommentRegistration'], 1000, 1);
         $hooks->filter('preprocess_comment', [$this, 'validateGuestCommentFrequency'], 5, 1);
     }
 
@@ -81,7 +82,8 @@ final class GuestCommentsModule implements ModuleInterface
     public function allowGuestCommentRegistration(mixed $preOption): mixed
     {
         if ($this->shouldBypassLoginRequirement()) {
-            return false;
+            // `pre_option_*` 中返回 false 代表不短路；这里必须返回布尔上等价于 false 的字符串。
+            return '0';
         }
 
         return $preOption;
@@ -154,7 +156,7 @@ final class GuestCommentsModule implements ModuleInterface
             return false;
         }
 
-        return $this->isFrontendCommentContext();
+        return true;
     }
 
     /**
@@ -183,22 +185,6 @@ final class GuestCommentsModule implements ModuleInterface
         }
 
         return false;
-    }
-
-    /**
-     * 判断当前前台页面是否可能渲染文章评论区域。
-     */
-    private function isFrontendCommentContext(): bool
-    {
-        if (! function_exists('is_singular') || ! is_singular()) {
-            return false;
-        }
-
-        if (function_exists('comments_open') && ! comments_open()) {
-            return false;
-        }
-
-        return true;
     }
 
     /**
