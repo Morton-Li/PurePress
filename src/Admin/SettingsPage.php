@@ -34,6 +34,7 @@ final class SettingsPage
     private const string REGISTRATION_RATE_LIMIT_MODULE_ID = RegistrationRateLimitModule::MODULE_ID;
     private const string PAGE_CACHE_MODULE_ID = PageCacheModule::MODULE_ID;
     private const string GUEST_COMMENTS_MODULE_ID = 'enhancement.guest_comments';
+    private const string COMMENT_REQUIRED_CONTENT_MODULE_ID = 'enhancement.comment_required_content';
     private const string SMTP_MODULE_ID = 'enhancement.smtp';
     private const string S3_MEDIA_MODULE_ID = 'integration.s3_media';
 
@@ -590,6 +591,13 @@ final class SettingsPage
             );
         }
 
+        if (in_array(self::COMMENT_REQUIRED_CONTENT_MODULE_ID, $allowedModuleIds, true)) {
+            $this->options->saveModuleSettings(
+                self::COMMENT_REQUIRED_CONTENT_MODULE_ID,
+                $this->submittedCommentRequiredContentSettings()
+            );
+        }
+
         if (in_array(self::REGISTRATION_RATE_LIMIT_MODULE_ID, $allowedModuleIds, true)) {
             $this->options->saveModuleSettings(
                 self::REGISTRATION_RATE_LIMIT_MODULE_ID,
@@ -788,6 +796,31 @@ final class SettingsPage
             'ip_limit' => $this->sanitizePositiveInteger($rawSettings['ip_limit'] ?? 5, 5, 1, 10000),
             'email_limit' => $this->sanitizePositiveInteger($rawSettings['email_limit'] ?? 5, 5, 1, 1000),
             'window_minutes' => $this->sanitizePositiveInteger($rawSettings['window_minutes'] ?? 10, 10, 1, 1440),
+        ];
+    }
+
+    /**
+     * 读取并清洗评论后可见内容配置。
+     *
+     * @return array{cookie_lifetime_days: int, placeholder_text: string, loading_text: string, error_text: string}
+     */
+    private function submittedCommentRequiredContentSettings(): array
+    {
+        $rawSettings = $_POST['module_settings'][self::COMMENT_REQUIRED_CONTENT_MODULE_ID] ?? [];
+
+        if (! is_array($rawSettings)) {
+            $rawSettings = [];
+        }
+
+        if (function_exists('wp_unslash')) {
+            $rawSettings = wp_unslash($rawSettings);
+        }
+
+        return [
+            'cookie_lifetime_days' => $this->sanitizePositiveInteger($rawSettings['cookie_lifetime_days'] ?? 365, 365, 1, 3650),
+            'placeholder_text' => $this->sanitizeTextValue($rawSettings['placeholder_text'] ?? '评论后可查看此内容。'),
+            'loading_text' => $this->sanitizeTextValue($rawSettings['loading_text'] ?? '正在检查评论状态...'),
+            'error_text' => $this->sanitizeTextValue($rawSettings['error_text'] ?? '内容加载失败，请稍后重试。'),
         ];
     }
 
@@ -1411,6 +1444,11 @@ final class SettingsPage
             return;
         }
 
+        if ($module->id() === self::COMMENT_REQUIRED_CONTENT_MODULE_ID) {
+            $this->renderCommentRequiredContentFields($moduleSettings);
+            return;
+        }
+
         if ($module->id() === self::SMTP_MODULE_ID) {
             $this->renderSmtpFields($moduleSettings);
             return;
@@ -1810,6 +1848,53 @@ final class SettingsPage
                 max="1440"
                 name="<?php echo esc_attr($fieldPrefix); ?>[window_minutes]"
                 value="<?php echo esc_attr((string) ($moduleSettings['window_minutes'] ?? 10)); ?>"
+            >
+        </div>
+        <?php
+    }
+
+    /**
+     * 渲染评论后可见内容配置字段。
+     *
+     * @param array<string,mixed> $moduleSettings 模块配置。
+     */
+    private function renderCommentRequiredContentFields(array $moduleSettings): void
+    {
+        $fieldPrefix = 'module_settings[' . self::COMMENT_REQUIRED_CONTENT_MODULE_ID . ']';
+        ?>
+        <div class="purepress-module__fields">
+            <label for="purepress-comment-required-cookie-days">访问有效期（天）</label>
+            <input
+                id="purepress-comment-required-cookie-days"
+                type="number"
+                min="1"
+                max="3650"
+                name="<?php echo esc_attr($fieldPrefix); ?>[cookie_lifetime_days]"
+                value="<?php echo esc_attr((string) ($moduleSettings['cookie_lifetime_days'] ?? 365)); ?>"
+            >
+
+            <label for="purepress-comment-required-placeholder">占位提示</label>
+            <input
+                id="purepress-comment-required-placeholder"
+                type="text"
+                name="<?php echo esc_attr($fieldPrefix); ?>[placeholder_text]"
+                value="<?php echo esc_attr((string) ($moduleSettings['placeholder_text'] ?? '评论后可查看此内容。')); ?>"
+            >
+
+            <label for="purepress-comment-required-loading">加载提示</label>
+            <input
+                id="purepress-comment-required-loading"
+                type="text"
+                name="<?php echo esc_attr($fieldPrefix); ?>[loading_text]"
+                value="<?php echo esc_attr((string) ($moduleSettings['loading_text'] ?? '正在检查评论状态...')); ?>"
+            >
+
+            <label for="purepress-comment-required-error">失败提示</label>
+            <input
+                id="purepress-comment-required-error"
+                type="text"
+                name="<?php echo esc_attr($fieldPrefix); ?>[error_text]"
+                value="<?php echo esc_attr((string) ($moduleSettings['error_text'] ?? '内容加载失败，请稍后重试。')); ?>"
             >
         </div>
         <?php
