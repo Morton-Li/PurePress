@@ -64,7 +64,6 @@ final class Defaults
                 '/wp-json',
                 '/feed',
                 '/comments/feed',
-                '/console',
             ],
         ],
         'enhancement.smtp' => [
