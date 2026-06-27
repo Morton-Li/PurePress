@@ -72,6 +72,13 @@ final class Defaults
             'email_limit' => 5,
             'window_minutes' => 10,
         ],
+        'enhancement.comment_required_content' => [
+            'enabled' => false,
+            'cookie_lifetime_days' => 365,
+            'placeholder_text' => '评论后可查看此内容。',
+            'loading_text' => '正在检查评论状态...',
+            'error_text' => '内容加载失败，请稍后重试。',
+        ],
         'enhancement.smtp' => [
             'enabled' => false,
             'host' => '',
